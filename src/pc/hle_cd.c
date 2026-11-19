@@ -1,9 +1,11 @@
 /* HLE for libcd.
- * Data reads are synchronous. A virtual read head advances in real time while a
- * ReadN/ReadS is active (75 or 150 sectors/s), so code that polls the position
- * (the XA music player uses CdlGetlocL) sees the same timing as on hardware. */
+ * Data is copied immediately, but CdReadSync reports "busy" until the time a real
+ * 2x drive would need (seek + 150 sectors/s), so loading screens (castle name,
+ * "Now Loading") stay up as long as on hardware. A virtual read head advances in
+ * real time while a ReadN/ReadS streams (XA music polls it with CdlGetlocL). */
 #include "hle.h"
 #include "audio.h"
+#include "settings.h"
 #include <stdlib.h>
 
 static u32 g_cd_pos;          /* LBA of the next sector the head will read */
@@ -13,6 +15,10 @@ static u32 g_cd_frac;         /* sub-sector accumulator, units of 1/60 sector */
 static u8  g_cd_lastcom;
 static u8  g_xa_file, g_xa_chan;  /* CdlSetfilter */
 static u8  g_cd_result[8];
+static u32 g_head;            /* where the drive head is after the last data read */
+static u32 g_read_done_vb;    /* vblank count at which the pending CdRead completes */
+static u32 g_read_last_poll;  /* vblank count of the previous CdReadSync poll */
+static int g_read_sectors_per_vb10;   /* sectors per vblank x10 (25 at 2x, 12 at 1x) */
 
 static int bcd2i(u8 b) { return (b >> 4) * 10 + (b & 15); }
 static u8 i2bcd(int i) { return (u8)(((i / 10) << 4) | (i % 10)); }
@@ -105,17 +111,47 @@ void hle_CdRead(Ctx *c) {
         disc_read_sector(g_cd_pos + i, sec);
         memcpy(ram_ptr(buf + i * 2048), sec, 2048);
     }
+    /* timing of a real drive: seek (distance based, ~0.1-0.4 s) + transfer */
+    u32 start = g_cd_pos;
+    u32 dist = start > g_head ? start - g_head : g_head - start;
+    int speed2x = (g_cd_mode & 0x80) != 0;
+    g_read_sectors_per_vb10 = speed2x ? 25 : 12;
+    u32 seek_vb = (dist < 8) ? 0 : 6 + dist * 18 / 330000;
+    u32 xfer_vb = (u32)(n * 10 + g_read_sectors_per_vb10 - 1) / (u32)g_read_sectors_per_vb10;
+    g_read_done_vb = g_settings.fast_load ? g_vblank_count : g_vblank_count + seek_vb + xfer_vb;
+    g_read_last_poll = g_vblank_count - 1;
+    g_head = start + n;
     g_cd_pos += n;
     g_cd_reading = 0;
     g_cd_lastcom = 0x06;
+    if (getenv("BRIG_CDTRACE")) rt_log("[cd] vb=%u CdRead %d sectors @%u: seek %u + transfer %u vblanks", g_vblank_count, n, start, seek_vb, xfer_vb);
     c->r[2] = 1;
 }
 
 void hle_CdRead2(Ctx *c) { rt_log("CdRead2 (streaming) mode=%X — not implemented", c->r[4]); c->r[2] = 1; }
 
+/* CdReadSync(mode, result): 0 = done, >0 = sectors still to come. mode 0 blocks.
+ * A game spinning on CdReadSync(1) without calling VSync still gets vblanks (display,
+ * callbacks, input) because each busy poll advances one vblank, like the hardware's
+ * VSync interrupt during a read. */
 void hle_CdReadSync(Ctx *c) {
+    u32 mode = c->r[4];
     if (c->r[5]) wr8(c->r[5], 0x02);
-    c->r[2] = 0;
+    for (;;) {
+        if ((s32)(g_vblank_count - g_read_done_vb) >= 0) { c->r[2] = 0; return; }
+        if (mode == 0 || g_vblank_count == g_read_last_poll) {
+            Ctx saved = *c;
+            hle_vblank_tick(c);      /* let a frame pass */
+            *c = saved;
+        }
+        g_read_last_poll = g_vblank_count;
+        if (mode != 0) {
+            s32 left_vb = (s32)(g_read_done_vb - g_vblank_count);
+            if (left_vb <= 0) { c->r[2] = 0; return; }
+            c->r[2] = (u32)((left_vb * g_read_sectors_per_vb10 + 9) / 10);
+            return;
+        }
+    }
 }
 
 /* CdlFILE { CdlLOC pos; u32 size; char name[16]; } */

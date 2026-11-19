@@ -61,11 +61,12 @@ paused while the window is open.
 - **Sound** — Music 30%, Sound effects 100%, Movies 50% by default (music level matches the
   emulator balance between music and menu sounds).
 - **Controls** — key / controller reference.
+- **System** — Loading: Original CD speed (default; loading screens last as long as on a PS1) or Fast.
 
 The game logic always runs at the PS1's 59.94 Hz (it counts frames), whatever the display refresh.
 Saved to `~/Library/Application Support/PortGamePC/Brigandine/settings.cfg` (Windows: `%APPDATA%`).
 Environment variables `BRIG_BGM_VOLUME`, `BRIG_SFX_VOLUME`, `BRIG_MOVIE_VOLUME` (percent),
-`BRIG_VSYNC` (0/1) and `BRIG_FRAMESKIP` (0–4) override the file.
+`BRIG_VSYNC` (0/1), `BRIG_FRAMESKIP` (0–4) and `BRIG_FAST_LOAD` (0/1) override the file.
 
 Debug env vars: `BRIG_TRACE=1` (per-second GPU stats), `BRIG_SHOT_DIR=<dir> BRIG_SHOT_EVERY=<n>`
 (BMP snapshots), `BRIG_INPUT="frame:hexmask,..."` (scripted pad input), `BRIG_SHOW_VRAM=1`,

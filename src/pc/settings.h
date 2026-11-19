@@ -7,6 +7,7 @@ typedef struct {
     int show_perf;                /* performance overlay */
     int fast_load;                /* 0 = original CD timing, 1 = instant loading */
     int autosave;                 /* save states at each phase change and battle start */
+    int slot;                     /* save slot used by F5 / F9 (1..10) */
 } Settings;
 extern Settings g_settings;
 

@@ -138,7 +138,7 @@ static void tab_controls(void) {
         { "D-pad", "Arrow keys", "D-pad" }, { "Circle (confirm)", "X", "B" }, { "Cross (cancel)", "Z", "A" },
         { "Triangle", "S", "Y" }, { "Square", "A", "X" }, { "L1 / R1", "Q / E", "LB / RB" },
         { "L2 / R2", "1 / 3", "LT / RT" }, { "Start / Select", "Enter / Backspace", "Start / Back" },
-        { "Fast-forward (hold)", "Tab", "" }, { "Quick save / load", "F5 / F9", "" },
+        { "Fast-forward (hold)", "Tab", "" }, { "Quick save / load", "F5 / F9", "" }, { "Change save slot", "Left Shift + Left / Right", "" },
         { "This window", "F2", "" },
     };
     if (ImGui::BeginTable("keys", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {
@@ -202,7 +202,7 @@ static void tab_save(void) {
     if (ImGui::Checkbox("Autosave", &as)) { g_settings.autosave = as; state_reset_autosave_tracking(); }
     ImGui::SameLine();
     ImGui::TextDisabled("at each new phase and when a battle starts (3 rotating slots)");
-    hint("F5 saves to the selected slot, F9 loads it. Click a slot to select it. "
+    hint("F5 saves to the selected slot, F9 loads it. Click a slot to select it, or press Left Shift + Left / Right in game. "
          "Memory card saves in the game's own menu still work and stay compatible with emulators.");
 
     const float th = 72.0f, tw = th * THUMB_W / THUMB_H;

@@ -79,7 +79,8 @@ Debug env vars: `BRIG_TRACE=1` (per-second GPU stats), `BRIG_SHOT_DIR=<dir> BRIG
 ## Quick save / load (save anywhere)
 The port's own save system works at any moment — on the map, in menus, in the middle of a battle —
 and loads instantly, without going back to the title screen.
-- `F5` saves to the selected slot, `F9` loads it. `F2` → **Save** shows 10 slots with a screenshot,
+- `F5` saves to the selected slot, `F9` loads it. `Left Shift` + `←` / `→` changes the slot (a message shows
+  its date and in-game month); the selected slot is remembered. `F2` → **Save** shows 10 slots with a screenshot,
   date / time and the in-game year, month and phase; click a slot to select it, or use its
   Save / Load / Delete buttons.
 - **Autosave** (on by default): 3 rotating slots, written when you finalize the Organize phase,

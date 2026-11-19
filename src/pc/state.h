@@ -47,6 +47,7 @@ void state_request_load(int slot);
 void state_request_delete(int slot);
 int  state_slot(void);
 void state_set_slot(int slot);
+void state_cycle_slot(int dir);   /* -1 / +1, wraps 1..10, shows a toast */
 int  state_slot_exists(int slot);
 int  state_read_info(int slot, StateHeader *out);   /* 1 ok, 0 empty, -1 other version */
 void state_slot_name(int slot, char *out, size_t n);

@@ -37,12 +37,29 @@ void ui_toast(const char *msg);                       /* ui.cpp */
 void platform_thumbnail(u8 *rgb, int w, int h);       /* platform.c */
 extern u32 g_exe_crc;                                 /* main.c */
 
-static int g_slot = 1;
 static int g_req_save = -1, g_req_load = -1, g_req_delete = -1;
 static int g_files_version;                           /* bumps whenever a state file changes */
 
-int state_slot(void) { return g_slot; }
-void state_set_slot(int slot) { g_slot = slot < 1 ? 1 : slot > 10 ? 10 : slot; }
+int state_slot(void) { return g_settings.slot < 1 || g_settings.slot > 10 ? 1 : g_settings.slot; }
+void state_set_slot(int slot) { g_settings.slot = slot < 1 ? 1 : slot > 10 ? 10 : slot; }
+
+/* Left Shift + Left / Right: previous / next slot (wraps), with a toast describing it */
+void state_cycle_slot(int dir) {
+    int sl = (state_slot() - 1 + dir + 10) % 10 + 1;
+    state_set_slot(sl);
+    if (!getenv("BRIG_STATE_DIR")) settings_save();   /* tests leave the real settings alone */
+    StateHeader *h = (StateHeader *)malloc(sizeof *h);
+    char msg[128];
+    int r = h ? state_read_info(sl, h) : 0;
+    if (r == 1) {
+        time_t t = (time_t)h->time; struct tm *lt = localtime(&t); char when[32] = "";
+        if (lt) strftime(when, sizeof when, "%Y-%m-%d %H:%M", lt);
+        if (h->in_game) snprintf(msg, sizeof msg, "Slot %d  -  %s  -  Year %u, Month %u", sl, when, h->year, h->month);
+        else snprintf(msg, sizeof msg, "Slot %d  -  %s", sl, when);
+    } else snprintf(msg, sizeof msg, r < 0 ? "Slot %d  -  other version" : "Slot %d  -  empty", sl);
+    free(h);
+    ui_toast(msg);
+}
 void state_request_save(int slot) { g_req_save = slot; }
 void state_request_load(int slot) { g_req_load = slot; }
 void state_request_delete(int slot) { g_req_delete = slot; }

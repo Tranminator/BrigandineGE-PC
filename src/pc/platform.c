@@ -1,21 +1,21 @@
-/* SDL2 platform layer: window, presentation of the PS1 display area, input, pacing,
+/* SDL2 platform layer: window, presentation of the PS1 display area (OpenGL, video_gl.c), input, pacing,
  * frame skipping, and the settings UI hook (ui.cpp, F2). */
 #include "hle.h"
 #include "gpu.h"
 #include "settings.h"
 #include "ui.h"
 #include "state.h"
+#include "video_gl.h"
 #include <SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 static SDL_Window *g_win;
-static SDL_Renderer *g_ren;
-static SDL_Texture *g_tex;
 static SDL_GameController *g_pad;
 static int g_quit, g_show_vram;
 static u32 g_frame[VRAM_W * VRAM_H];
-static int g_tex_w, g_tex_h;          /* size of the image currently in g_tex */
+static int g_tex_w, g_tex_h;          /* size of the image currently in the GL texture */
+static int g_gl_ok;
 static Uint64 g_next_frame, g_ideal;
 static int g_vsync_clock;            /* 1: display vsync (~60 Hz) is the frame clock */
 static int g_refresh_hz;
@@ -34,29 +34,35 @@ void platform_set_movie_frame(const u8 *rgb, int w, int h) { g_movie_rgb = rgb; 
 /* Apply VSync setting. With a ~60 Hz display and VSync on, presenting is the frame clock;
  * otherwise we sleep to 59.94 Hz ourselves (VSync off = best for VRR displays). */
 void platform_apply_video(void) {
-    if (!g_ren) return;
-    SDL_RenderSetVSync(g_ren, g_settings.vsync ? 1 : 0);
+    if (!g_gl_ok) return;
+    vgl_set_vsync(g_settings.vsync);
     g_vsync_clock = g_settings.vsync && g_refresh_hz >= 59 && g_refresh_hz <= 61;
     g_next_frame = g_ideal = SDL_GetPerformanceCounter();
 }
 
 int platform_init(const char *title) {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS) != 0) return 0;
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 0);
     g_win = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 960, 720,
-                             SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
-    g_ren = SDL_CreateRenderer(g_win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    if (!g_ren) g_ren = SDL_CreateRenderer(g_win, -1, SDL_RENDERER_ACCELERATED);
+                             SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_OPENGL);
+    if (!g_win) { rt_log("[video] window: %s", SDL_GetError()); return 0; }
+    g_gl_ok = vgl_init(g_win);
+    if (!g_gl_ok) { rt_log("[video] OpenGL 3.2 is required: %s", SDL_GetError()); return 0; }
     SDL_DisplayMode dm;
     g_refresh_hz = SDL_GetCurrentDisplayMode(SDL_GetWindowDisplayIndex(g_win), &dm) == 0 ? dm.refresh_rate : 0;
-    g_tex = SDL_CreateTexture(g_ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, VRAM_W, VRAM_H);
     for (int i = 0; i < SDL_NumJoysticks(); i++)
         if (SDL_IsGameController(i)) { g_pad = SDL_GameControllerOpen(i); break; }
     if (getenv("BRIG_SHOW_VRAM")) g_show_vram = 1;
     platform_apply_video();
     if (getenv("BRIG_TRACE")) rt_log("[video] display %d Hz, vsync=%d, vsync clock=%d, frameskip=%d",
                                      g_refresh_hz, g_settings.vsync, g_vsync_clock, g_settings.frameskip);
-    ui_init(g_win, g_ren);
-    return g_win && g_ren && g_tex;
+    ui_init(g_win, vgl_context());
+    return 1;
 }
 
 int platform_quit_requested(void) { return g_quit; }
@@ -106,8 +112,7 @@ static void upload_frame(void) {
                 g_frame[y * w + x] = (g_gpu.disp_enabled || g_show_vram)
                     ? c15(g_vram[((y0 + y) & 511) * VRAM_W + ((x0 + x) & 1023)]) : 0xFF000000u;
     }
-    SDL_Rect src = { 0, 0, w, h };
-    SDL_UpdateTexture(g_tex, &src, g_frame, w * 4);
+    vgl_upload(g_frame, w, h);
     g_tex_w = w; g_tex_h = h;
 }
 
@@ -115,15 +120,12 @@ static void present(int skipped) {
     /* a skipped game frame left a stale buffer on screen: keep showing the previous image */
     if (!skipped || g_movie_rgb || g_show_vram || !g_tex_w) upload_frame();
     int ow, oh;
-    SDL_GetRendererOutputSize(g_ren, &ow, &oh);
+    vgl_drawable_size(&ow, &oh);
     /* 4:3 (or VRAM 2:1) image, letterboxed in the window */
     double aspect = g_show_vram ? 2.0 : 4.0 / 3.0;
     int dw = ow, dh = (int)(ow / aspect);
     if (dh > oh) { dh = oh; dw = (int)(oh * aspect); }
-    SDL_Rect dst = { (ow - dw) / 2, (oh - dh) / 2, dw, dh }, src = { 0, 0, g_tex_w, g_tex_h };
-    SDL_SetRenderDrawColor(g_ren, 0, 0, 0, 255);
-    SDL_RenderClear(g_ren);
-    if (g_tex_w) SDL_RenderCopy(g_ren, g_tex, &src, &dst);
+    vgl_draw((ow - dw) / 2, (oh - dh) / 2, dw, dh);
     ui_frame();
     /* debug: BRIG_SHOT_DIR=<dir> BRIG_SHOT_EVERY=<frames> dumps BMP snapshots of the final window image */
     static int frame_no;
@@ -137,14 +139,14 @@ static void present(int skipped) {
     int in_range = (!sf_ || frame_no >= atoi(sf_)) && (!st_ || frame_no <= atoi(st_));
     if (dir && ev && atoi(ev) > 0 && in_range && (frame_no % atoi(ev)) == 0) {
         SDL_Surface *sf = SDL_CreateRGBSurfaceWithFormat(0, ow, oh, 32, SDL_PIXELFORMAT_ARGB8888);
-        if (sf && SDL_RenderReadPixels(g_ren, NULL, SDL_PIXELFORMAT_ARGB8888, sf->pixels, sf->pitch) == 0) {
+        if (sf && sf->pitch == ow * 4 && vgl_read_pixels((u32 *)sf->pixels, ow, oh)) {
             char path[512];
             snprintf(path, sizeof path, "%s/shot_%05d.bmp", dir, frame_no);
             SDL_SaveBMP(sf, path);
         }
         if (sf) SDL_FreeSurface(sf);
     }
-    SDL_RenderPresent(g_ren);
+    vgl_swap();
 }
 
 /* debug: BRIG_KEYS="frame:KeyName,..." injects key presses (SDL key names, e.g. F2, Down, Right, Escape) */
@@ -242,7 +244,7 @@ void platform_vblank(void) {
     static int ff, fast_env = -1;
     if (fast_env < 0) fast_env = getenv("BRIG_FAST") != NULL;
     int want_ff = k[SDL_SCANCODE_TAB] || fast_env;
-    if (want_ff != ff) { ff = want_ff; SDL_RenderSetVSync(g_ren, ff ? 0 : g_settings.vsync); }
+    if (want_ff != ff) { ff = want_ff; vgl_set_vsync(ff ? 0 : g_settings.vsync); }
     if (ff) {
         g_next_frame = g_ideal = now;
     } else if (!g_vsync_clock) {

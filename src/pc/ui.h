@@ -5,7 +5,7 @@
 extern "C" {
 #endif
 
-void ui_init(SDL_Window *win, SDL_Renderer *ren);
+void ui_init(SDL_Window *win, void *gl_context);
 int  ui_event(const SDL_Event *e);   /* returns 1 when the UI consumed the event */
 int  ui_is_open(void);
 void ui_frame(void);                 /* draw the UI (if visible) into the current frame */

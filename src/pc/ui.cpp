@@ -3,7 +3,8 @@
 #include "ui.h"
 #include "imgui.h"
 #include "imgui_impl_sdl2.h"
-#include "imgui_impl_sdlrenderer2.h"
+#include "imgui_impl_opengl3.h"
+#include "video_gl.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -15,7 +16,6 @@ void platform_apply_video(void);
 #include <time.h>
 
 static SDL_Window *s_win;
-static SDL_Renderer *s_ren;
 static bool s_open;
 static bool s_ready;
 static char s_toast[128];
@@ -30,8 +30,8 @@ static const char *FONT_CANDIDATES[] = {
     "/usr/share/fonts/TTF/DejaVuSans.ttf",
 };
 
-extern "C" void ui_init(SDL_Window *win, SDL_Renderer *ren) {
-    s_win = win; s_ren = ren;
+extern "C" void ui_init(SDL_Window *win, void *gl_context) {
+    s_win = win;
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO &io = ImGui::GetIO();
@@ -45,7 +45,7 @@ extern "C" void ui_init(SDL_Window *win, SDL_Renderer *ren) {
     // crisp text on HiDPI: rasterise the font at pixel density, then scale back
     int ww, wh, ow, oh;
     SDL_GetWindowSize(win, &ww, &wh);
-    SDL_GetRendererOutputSize(ren, &ow, &oh);
+    vgl_drawable_size(&ow, &oh);
     float dpi = ww ? (float)ow / ww : 1.0f;
     for (const char *path : FONT_CANDIDATES) {
         FILE *f = fopen(path, "rb");
@@ -53,8 +53,8 @@ extern "C" void ui_init(SDL_Window *win, SDL_Renderer *ren) {
         fclose(f);
         if (io.Fonts->AddFontFromFileTTF(path, 17.0f * dpi)) { io.FontGlobalScale = 1.0f / dpi; break; }
     }
-    ImGui_ImplSDL2_InitForSDLRenderer(win, ren);
-    ImGui_ImplSDLRenderer2_Init(ren);
+    ImGui_ImplSDL2_InitForOpenGL(win, gl_context);
+    ImGui_ImplOpenGL3_Init("#version 150");
     s_ready = true;
 }
 
@@ -76,7 +76,7 @@ static void toast_overlay(void) {
     ImGui::End();
 }
 
-static void close_ui(void) { s_open = false; settings_save(); }
+static void close_ui(void) { s_open = false; settings_save(); vgl_save_config(); }
 
 extern "C" int ui_event(const SDL_Event *e) {
     if (!s_ready) return 0;
@@ -120,6 +120,47 @@ static void tab_graphics(void) {
     if (ImGui::Combo("Frame skip", &fs, skip_names, IM_ARRAYSIZE(skip_names))) g_settings.frameskip = fs;
     hint("Skips drawing on slow machines so the game keeps its normal speed.");
 
+    ImGui::SeparatorText("Shader");
+    int cur = vgl_shader_current();
+    if (ImGui::BeginCombo("Shader", vgl_shader_name(cur))) {
+        for (int i = 0; i < vgl_shader_count(); i++) {
+            if (i > 0 && vgl_shader_is_builtin(i - 1) && !vgl_shader_is_builtin(i)) ImGui::Separator();
+            if (ImGui::Selectable(vgl_shader_name(i), i == cur)) vgl_select_shader(i);
+            if (i == cur) ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Reload")) vgl_rescan_shaders();
+    static const char *descs[] = {
+        "Crisp pixels without uneven widths at any window size (default).",
+        "Raw nearest-neighbour pixels.",
+        "Bilinear filtering: soft image.",
+        "Dark gaps between lines, like a TV.",
+        "Curved CRT screen: scanlines, shadow mask, glow.",
+    };
+    cur = vgl_shader_current();
+    if (cur >= 0 && cur < (int)IM_ARRAYSIZE(descs) && vgl_shader_is_builtin(cur)) hint(descs[cur]);
+    else {
+        bool lin = vgl_filter_linear() != 0;
+        if (ImGui::Checkbox("Bilinear texture filter", &lin)) vgl_set_filter_linear(lin);
+    }
+    for (int i = 0; i < vgl_param_count(); i++) {
+        VglParam *p = vgl_param(i);
+        ImGui::PushID(i);
+        if (ImGui::SliderFloat(p->desc, &p->value, p->min, p->max, "%.2f")) {
+            if (p->step > 0) p->value = p->min + (float)(int)((p->value - p->min) / p->step + 0.5f) * p->step;
+            vgl_param_changed(i);
+        }
+        ImGui::PopID();
+    }
+    if (vgl_param_count() > 0 && ImGui::Button("Reset to defaults")) vgl_reset_params();
+    hint("More shaders: put RetroArch single-pass .glsl files in the shaders folder, then press Reload.");
+    if (ImGui::Button("Open shaders folder")) {
+        char url[1200]; snprintf(url, sizeof url, "file://%s", vgl_shader_dir());
+        SDL_OpenURL(url);
+    }
+
     ImGui::Spacing();
     bool perf = g_settings.show_perf != 0;
     if (ImGui::Checkbox("Show performance", &perf)) g_settings.show_perf = perf;
@@ -162,7 +203,7 @@ static void tab_system(void) {
 
 /* ---------------------------------------------------------------- Save tab */
 #define NSLOTS (10 + AUTO_COUNT)
-struct SlotView { int slot; int status; StateHeader h; SDL_Texture *tex; };
+struct SlotView { int slot; int status; StateHeader h; unsigned tex; };
 static SlotView *s_slots;          /* index 0..9 manual, 10.. autosaves */
 static int s_slots_version = -1;
 
@@ -176,8 +217,8 @@ static void refresh_slots(void) {
         v.slot = slot_of(i);
         v.status = state_read_info(v.slot, &v.h);
         if (v.status != 1) continue;
-        if (!v.tex) v.tex = SDL_CreateTexture(s_ren, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STATIC, THUMB_W, THUMB_H);
-        if (v.tex) SDL_UpdateTexture(v.tex, nullptr, v.h.thumb, THUMB_W * 3);
+        if (!v.tex) v.tex = vgl_create_rgb_texture(THUMB_W, THUMB_H, v.h.thumb);
+        else vgl_update_rgb_texture(v.tex, THUMB_W, THUMB_H, v.h.thumb);
     }
 }
 
@@ -290,7 +331,7 @@ static void perf_overlay(void) {
 extern "C" void ui_frame(void) {
     bool toast = s_toast[0] && SDL_GetTicks() <= s_toast_until;
     if (!s_ready || (!s_open && !g_settings.show_perf && !toast)) return;
-    ImGui_ImplSDLRenderer2_NewFrame();
+    ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplSDL2_NewFrame();
     ImGui::NewFrame();
     if (g_settings.show_perf) perf_overlay();
@@ -320,5 +361,5 @@ extern "C" void ui_frame(void) {
         if (!keep) close_ui();
     }
     ImGui::Render();
-    ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(), s_ren);
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }

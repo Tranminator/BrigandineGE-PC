@@ -84,6 +84,13 @@ Debug env vars: `BRIG_TRACE=1` (per-second GPU stats), `BRIG_SHOT_DIR=<dir> BRIG
 - `docs/` — plan, disc layout, findings
 - `tools/seq_render.c` — offline renderer for the game's music (A/B against recordings)
 
+## Third-party assets
+- `assets/fonts/DotGothic16-Regular.ttf` — [DotGothic16](https://github.com/fontworks-fonts/DotGothic16)
+  (Google Fonts), © The DotGothic16 Project Authors, SIL Open Font License 1.1
+  (`assets/fonts/OFL-DotGothic16.txt`). Used to draw the text the English patch renders through the
+  PS1 BIOS font.
+- Dear ImGui (MIT) is fetched by CMake at build time.
+
 ## License
 The code in this repository is released under the [MIT License](LICENSE).
 It covers only this project's own code and tools — not the game, which you must own.

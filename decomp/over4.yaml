@@ -1,0 +1,26 @@
+name: Brigandine GE OVER4.BIN
+sha1: 5071121fa62eddd01450b56929d82193bb5b4db8
+options:
+  basename: OVER4
+  target_path: ../extracted/disc1/OVER4.BIN
+  base_path: .
+  platform: psx
+  compiler: GCC
+  asm_path: asm/over4
+  src_path: src/over4
+  build_path: build
+  ld_script_path: over4.ld
+  symbol_addrs_path: [symbol_addrs.txt, symbol_addrs_over4.txt]
+  undefined_funcs_auto_path: undefined_funcs_auto_over4.txt
+  undefined_syms_auto_path: undefined_syms_auto_over4.txt
+  gp_value: 0x800A5FC8
+  use_legacy_include_asm: False
+segments:
+  - name: over4
+    type: code
+    start: 0x0
+    vram: 0x800B6838
+    subsegments:
+      - [0x0, data, header]
+      - [0x8, asm, code]
+  - [0xc800]

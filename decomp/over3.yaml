@@ -1,0 +1,26 @@
+name: Brigandine GE OVER3.BIN
+sha1: 2e4b7152102328cde2ca09b9becb2deb41dfd984
+options:
+  basename: OVER3
+  target_path: ../extracted/disc1/OVER3.BIN
+  base_path: .
+  platform: psx
+  compiler: GCC
+  asm_path: asm/over3
+  src_path: src/over3
+  build_path: build
+  ld_script_path: over3.ld
+  symbol_addrs_path: [symbol_addrs.txt, symbol_addrs_over3.txt]
+  undefined_funcs_auto_path: undefined_funcs_auto_over3.txt
+  undefined_syms_auto_path: undefined_syms_auto_over3.txt
+  gp_value: 0x800A5FC8
+  use_legacy_include_asm: False
+segments:
+  - name: over3
+    type: code
+    start: 0x0
+    vram: 0x800B6838
+    subsegments:
+      - [0x0, data, header]
+      - [0x8, asm, code]
+  - [0x10350]

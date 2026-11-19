@@ -1,0 +1,295 @@
+/* Software PS1 GPU: VRAM 1024x512x16bpp, GP0 command processing, rasterizer. */
+#include "gpu.h"
+#include "rt.h"
+#include <stdlib.h>
+
+u16 g_vram[VRAM_W * VRAM_H];
+GpuState g_gpu;
+
+static inline int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+void gpu_reset(void) {
+    memset(g_vram, 0, sizeof g_vram);
+    memset(&g_gpu, 0, sizeof g_gpu);
+    g_gpu.area_x1 = VRAM_W - 1;
+    g_gpu.area_y1 = VRAM_H - 1;
+    g_gpu.disp_w = 320; g_gpu.disp_h = 240;
+}
+
+/* ------------------------------------------------------------------ pixel ops */
+static inline u16 blend(u16 bg, u16 fg, int mode) {
+    int br = bg & 31, bgc = (bg >> 5) & 31, bb = (bg >> 10) & 31;
+    int fr = fg & 31, fgc = (fg >> 5) & 31, fb = (fg >> 10) & 31;
+    int r, g, b;
+    switch (mode) {
+    case 0: r = (br + fr) >> 1; g = (bgc + fgc) >> 1; b = (bb + fb) >> 1; break;
+    case 1: r = br + fr; g = bgc + fgc; b = bb + fb; break;
+    case 2: r = br - fr; g = bgc - fgc; b = bb - fb; break;
+    default: r = br + (fr >> 2); g = bgc + (fgc >> 2); b = bb + (fb >> 2); break;
+    }
+    r = clampi(r, 0, 31); g = clampi(g, 0, 31); b = clampi(b, 0, 31);
+    return (u16)(r | (g << 5) | (b << 10) | (fg & 0x8000));
+}
+
+static inline void plot(int x, int y, u16 c, int semi, int check_bit15) {
+    if (x < g_gpu.area_x0 || x > g_gpu.area_x1 || y < g_gpu.area_y0 || y > g_gpu.area_y1) return;
+    u16 *p = &g_vram[(y & 511) * VRAM_W + (x & 1023)];
+    if (g_gpu.mask_check && (*p & 0x8000)) return;
+    if (semi && (!check_bit15 || (c & 0x8000))) c = blend(*p, c, g_gpu.semi_mode);
+    if (g_gpu.mask_set) c |= 0x8000;
+    *p = c;
+}
+
+/* Texture fetch. tp = texpage bits (x base, y base, depth), clut = packed clut field. */
+static inline u16 texel(int u, int v, u32 tp, u32 clut) {
+    u &= 0xFF; v &= 0xFF;
+    u = (u & ~(g_gpu.tw_mw * 8)) | ((g_gpu.tw_ox & g_gpu.tw_mw) * 8);
+    v = (v & ~(g_gpu.tw_mh * 8)) | ((g_gpu.tw_oy & g_gpu.tw_mh) * 8);
+    int bx = (tp & 15) * 64, by = ((tp >> 4) & 1) * 256, depth = (tp >> 7) & 3;
+    int cx = (clut & 63) * 16, cy = (clut >> 6) & 511;
+    if (depth == 0) {
+        u16 w = g_vram[((by + v) & 511) * VRAM_W + ((bx + u / 4) & 1023)];
+        int idx = (w >> ((u & 3) * 4)) & 15;
+        return g_vram[cy * VRAM_W + ((cx + idx) & 1023)];
+    } else if (depth == 1) {
+        u16 w = g_vram[((by + v) & 511) * VRAM_W + ((bx + u / 2) & 1023)];
+        int idx = (w >> ((u & 1) * 8)) & 255;
+        return g_vram[cy * VRAM_W + ((cx + idx) & 1023)];
+    }
+    return g_vram[((by + v) & 511) * VRAM_W + ((bx + u) & 1023)];
+}
+
+static inline u16 modulate(u16 t, int r, int g, int b) {
+    int tr = ((t & 31) * r) >> 7, tg = (((t >> 5) & 31) * g) >> 7, tb = (((t >> 10) & 31) * b) >> 7;
+    return (u16)(clampi(tr, 0, 31) | (clampi(tg, 0, 31) << 5) | (clampi(tb, 0, 31) << 10) | (t & 0x8000));
+}
+
+static inline u16 rgb24to15(int r, int g, int b) {
+    return (u16)((clampi(r, 0, 255) >> 3) | ((clampi(g, 0, 255) >> 3) << 5) | ((clampi(b, 0, 255) >> 3) << 10));
+}
+
+/* ------------------------------------------------------------------ triangles */
+typedef struct { int x, y, r, g, b, u, v; } Vtx;
+
+static void draw_tri(Vtx a, Vtx b, Vtx c, int gouraud, int textured, int raw, int semi, u32 tp, u32 clut) {
+    int area = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
+    if (area == 0) return;
+    if (area < 0) { Vtx t = b; b = c; c = t; area = -area; }
+    int minx = clampi(a.x < b.x ? (a.x < c.x ? a.x : c.x) : (b.x < c.x ? b.x : c.x), g_gpu.area_x0, g_gpu.area_x1);
+    int maxx = clampi(a.x > b.x ? (a.x > c.x ? a.x : c.x) : (b.x > c.x ? b.x : c.x), g_gpu.area_x0, g_gpu.area_x1);
+    int miny = clampi(a.y < b.y ? (a.y < c.y ? a.y : c.y) : (b.y < c.y ? b.y : c.y), g_gpu.area_y0, g_gpu.area_y1);
+    int maxy = clampi(a.y > b.y ? (a.y > c.y ? a.y : c.y) : (b.y > c.y ? b.y : c.y), g_gpu.area_y0, g_gpu.area_y1);
+    if (maxx - minx > 1023 || maxy - miny > 511) return; /* hardware rejects huge polys */
+    for (int y = miny; y <= maxy; y++) {
+        for (int x = minx; x <= maxx; x++) {
+            /* edge functions with top-left rule approximated by half-open test */
+            int w0 = (c.x - b.x) * (y - b.y) - (c.y - b.y) * (x - b.x);
+            int w1 = (a.x - c.x) * (y - c.y) - (a.y - c.y) * (x - c.x);
+            int w2 = (b.x - a.x) * (y - a.y) - (b.y - a.y) * (x - a.x);
+            if (w0 < 0 || w1 < 0 || w2 < 0) continue;
+            if ((w0 == 0 && !(c.y > b.y || (c.y == b.y && c.x < b.x))) ||
+                (w1 == 0 && !(a.y > c.y || (a.y == c.y && a.x < c.x))) ||
+                (w2 == 0 && !(b.y > a.y || (b.y == a.y && b.x < a.x)))) continue;
+            int r = a.r, g = a.g, bl = a.b;
+            if (gouraud) {
+                r = (a.r * w0 + b.r * w1 + c.r * w2) / area;
+                g = (a.g * w0 + b.g * w1 + c.g * w2) / area;
+                bl = (a.b * w0 + b.b * w1 + c.b * w2) / area;
+            }
+            u16 px;
+            if (textured) {
+                int u = (a.u * w0 + b.u * w1 + c.u * w2) / area;
+                int v = (a.v * w0 + b.v * w1 + c.v * w2) / area;
+                px = texel(u, v, tp, clut);
+                if (px == 0) continue;
+                if (!raw) px = modulate(px, r, g, bl);
+                plot(x, y, px, semi, 1);
+            } else {
+                plot(x, y, rgb24to15(r, g, bl), semi, 0);
+            }
+        }
+    }
+}
+
+/* ------------------------------------------------------------------ lines / rects */
+static void draw_line(Vtx a, Vtx b, int gouraud, int semi) {
+    int dx = abs(b.x - a.x), dy = abs(b.y - a.y);
+    int n = dx > dy ? dx : dy;
+    if (n > 1023) return;
+    for (int i = 0; i <= n; i++) {
+        int x = n ? a.x + (b.x - a.x) * i / n : a.x;
+        int y = n ? a.y + (b.y - a.y) * i / n : a.y;
+        int r = a.r, g = a.g, bl = a.b;
+        if (gouraud && n) { r += (b.r - a.r) * i / n; g += (b.g - a.g) * i / n; bl += (b.b - a.b) * i / n; }
+        plot(x, y, rgb24to15(r, g, bl), semi, 0);
+    }
+}
+
+static void draw_rect(int x, int y, int w, int h, int r, int g, int b, int textured, int raw, int semi,
+                      int u0, int v0, u32 clut) {
+    for (int j = 0; j < h; j++) {
+        for (int i = 0; i < w; i++) {
+            if (textured) {
+                int u = g_gpu.flip_x ? u0 - i : u0 + i;
+                int v = g_gpu.flip_y ? v0 - j : v0 + j;
+                u16 px = texel(u, v, g_gpu.texpage, clut);
+                if (px == 0) continue;
+                if (!raw) px = modulate(px, r, g, b);
+                plot(x + i, y + j, px, semi, 1);
+            } else {
+                plot(x + i, y + j, rgb24to15(r, g, b), semi, 0);
+            }
+        }
+    }
+}
+
+/* ------------------------------------------------------------------ GP0 */
+static inline int sx11(u32 v) { return ((s32)(v << 21)) >> 21; }
+
+static void set_texpage(u32 v) {
+    g_gpu.texpage = v & 0x1FF;
+    g_gpu.semi_mode = (v >> 5) & 3;
+    g_gpu.flip_x = (v >> 12) & 1;
+    g_gpu.flip_y = (v >> 13) & 1;
+}
+
+/* Number of words for a GP0 command (including the command word). 0 = variable/unknown. */
+int gp0_len(u32 cmd) {
+    u32 op = cmd >> 24;
+    if (op >= 0x20 && op < 0x40) {
+        int verts = (op & 8) ? 4 : 3, gour = (op >> 4) & 1, tex = (op >> 2) & 1;
+        return 1 + verts * (1 + tex) + (gour ? verts - 1 : 0);
+    }
+    if (op >= 0x40 && op < 0x60) return (op & 8) ? 0 : ((op & 0x10) ? 4 : 3);
+    if (op >= 0x60 && op < 0x80) {
+        int n = 2 + ((op >> 2) & 1);
+        if (((op >> 3) & 3) == 0) n++;
+        return n;
+    }
+    if (op == 0x02) return 3;
+    if (op == 0x80) return 4;
+    if (op == 0xA0 || op == 0xC0) return 3;
+    return 1;
+}
+
+void gpu_gp0_packet(const u32 *w, int n) {
+    u32 op = w[0] >> 24;
+    if (op == 0x00 || op == 0x01) return;
+    if (op == 0x02) {
+        int x = (w[1] & 0x3F0), y = (w[1] >> 16) & 0x1FF;
+        int ww = ((w[2] & 0x3FF) + 15) & ~15, hh = (w[2] >> 16) & 0x1FF;
+        u16 c = rgb24to15(w[0] & 255, (w[0] >> 8) & 255, (w[0] >> 16) & 255);
+        for (int j = 0; j < hh; j++)
+            for (int i = 0; i < ww; i++) g_vram[((y + j) & 511) * VRAM_W + ((x + i) & 1023)] = c;
+        return;
+    }
+    if (op >= 0x20 && op < 0x40) {
+        int quad = (op >> 3) & 1, gour = (op >> 4) & 1, tex = (op >> 2) & 1, semi = (op >> 1) & 1, raw = op & 1;
+        int nv = quad ? 4 : 3;
+        Vtx v[4];
+        u32 clut = 0, tp = g_gpu.texpage;
+        int k = 0;
+        u32 col = w[k++];
+        for (int i = 0; i < nv; i++) {
+            if (i > 0 && gour) col = w[k++];
+            u32 xy = w[k++];
+            v[i].r = col & 255; v[i].g = (col >> 8) & 255; v[i].b = (col >> 16) & 255;
+            v[i].x = sx11(xy) + g_gpu.ofs_x; v[i].y = sx11(xy >> 16) + g_gpu.ofs_y;
+            v[i].u = v[i].v = 0;
+            if (tex) {
+                u32 uv = w[k++];
+                v[i].u = uv & 255; v[i].v = (uv >> 8) & 255;
+                if (i == 0) clut = uv >> 16;
+                if (i == 1) { tp = (uv >> 16) & 0x1FF; g_gpu.semi_mode = (uv >> 21) & 3; g_gpu.texpage = tp; }
+            }
+        }
+        if (semi && tex) { /* semi mode already updated from tpage */ }
+        draw_tri(v[0], v[1], v[2], gour, tex, raw, semi, tp, clut);
+        if (quad) draw_tri(v[1], v[2], v[3], gour, tex, raw, semi, tp, clut);
+        return;
+    }
+    if (op >= 0x40 && op < 0x60) {
+        int gour = (op >> 4) & 1, semi = (op >> 1) & 1;
+        Vtx prev = {0};
+        int k = 0, first = 1;
+        u32 col = w[k++];
+        while (k < n) {
+            if (!first && gour) {
+                if ((w[k] & 0xF000F000u) == 0x50005000u) break;
+                col = w[k++];
+            }
+            if (k >= n) break;
+            if (!first && (w[k] & 0xF000F000u) == 0x50005000u) break;
+            Vtx cur = { sx11(w[k]) + g_gpu.ofs_x, sx11(w[k] >> 16) + g_gpu.ofs_y,
+                        (int)(col & 255), (int)((col >> 8) & 255), (int)((col >> 16) & 255), 0, 0 };
+            k++;
+            if (!first) draw_line(prev, cur, gour, semi);
+            prev = cur; first = 0;
+            if (!(op & 8) && k >= (gour ? 4 : 3)) break;
+        }
+        return;
+    }
+    if (op >= 0x60 && op < 0x80) {
+        int tex = (op >> 2) & 1, semi = (op >> 1) & 1, raw = op & 1, sz = (op >> 3) & 3;
+        int k = 1;
+        int x = sx11(w[k]) + g_gpu.ofs_x, y = sx11(w[k] >> 16) + g_gpu.ofs_y; k++;
+        int u = 0, v = 0; u32 clut = 0;
+        if (tex) { u = w[k] & 255; v = (w[k] >> 8) & 255; clut = w[k] >> 16; k++; }
+        int ww, hh;
+        if (sz == 0) { ww = w[k] & 0x3FF; hh = (w[k] >> 16) & 0x1FF; }
+        else if (sz == 1) ww = hh = 1;
+        else if (sz == 2) ww = hh = 8;
+        else ww = hh = 16;
+        draw_rect(x, y, ww, hh, w[0] & 255, (w[0] >> 8) & 255, (w[0] >> 16) & 255, tex, raw, semi, u, v, clut);
+        return;
+    }
+    if (op == 0x80) {
+        int sx = w[1] & 1023, sy = (w[1] >> 16) & 511, dx = w[2] & 1023, dy = (w[2] >> 16) & 511;
+        int ww = w[3] & 0xFFFF, hh = w[3] >> 16;
+        ww = ww ? ww : 1024; hh = hh ? hh : 512;
+        u16 *tmp = malloc((size_t)ww * hh * 2);
+        for (int j = 0; j < hh; j++) for (int i = 0; i < ww; i++)
+            tmp[j * ww + i] = g_vram[((sy + j) & 511) * VRAM_W + ((sx + i) & 1023)];
+        for (int j = 0; j < hh; j++) for (int i = 0; i < ww; i++)
+            g_vram[((dy + j) & 511) * VRAM_W + ((dx + i) & 1023)] = tmp[j * ww + i];
+        free(tmp);
+        return;
+    }
+    switch (op) {
+    case 0xE1: set_texpage(w[0]); return;
+    case 0xE2:
+        g_gpu.tw_mw = w[0] & 31; g_gpu.tw_mh = (w[0] >> 5) & 31;
+        g_gpu.tw_ox = (w[0] >> 10) & 31; g_gpu.tw_oy = (w[0] >> 15) & 31; return;
+    case 0xE3: g_gpu.area_x0 = w[0] & 1023; g_gpu.area_y0 = (w[0] >> 10) & 511; return;
+    case 0xE4: g_gpu.area_x1 = w[0] & 1023; g_gpu.area_y1 = (w[0] >> 10) & 511; return;
+    case 0xE5: g_gpu.ofs_x = sx11(w[0]); g_gpu.ofs_y = sx11(w[0] >> 11); return;
+    case 0xE6: g_gpu.mask_set = w[0] & 1; g_gpu.mask_check = (w[0] >> 1) & 1; return;
+    }
+}
+
+/* Feed a raw word stream (e.g. an OT node body). */
+void gpu_gp0_stream(const u32 *w, int n) {
+    int i = 0;
+    while (i < n) {
+        u32 op = w[i] >> 24;
+        int len = gp0_len(w[i]);
+        if (op >= 0x40 && op < 0x60 && (op & 8)) {  /* polyline: until terminator */
+            int j = i + 1;
+            while (j < n && (w[j] & 0xF000F000u) != 0x50005000u) j++;
+            len = j - i + (j < n ? 1 : 0);
+        }
+        if (op == 0xA0) { /* CPU->VRAM inline image */
+            if (i + 3 > n) return;
+            int x = w[i + 1] & 1023, y = (w[i + 1] >> 16) & 511, ww = w[i + 2] & 0xFFFF, hh = w[i + 2] >> 16;
+            int words = (ww * hh + 1) / 2;
+            const u16 *src = (const u16 *)&w[i + 3];
+            for (int j = 0; j < hh; j++) for (int k = 0; k < ww; k++)
+                g_vram[((y + j) & 511) * VRAM_W + ((x + k) & 1023)] = src[j * ww + k];
+            i += 3 + words;
+            continue;
+        }
+        if (i + len > n) len = n - i;
+        gpu_gp0_packet(&w[i], len);
+        i += len;
+    }
+}

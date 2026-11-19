@@ -1,0 +1,20 @@
+iso/
+extracted/
+.venv/
+*.bin
+*.cue
+*.chd
+*.iso
+*.img
+.DS_Store
+build/
+
+# Generated from the game's own code/data — never commit (regenerate locally from your disc)
+decomp/asm/
+decomp/*.ld
+decomp/undefined_*_auto*.txt
+decomp/build/
+
+# Third-party data fetched separately / personal files
+tools/third_party/
+docs/cheats/

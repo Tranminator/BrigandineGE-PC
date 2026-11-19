@@ -1,0 +1,109 @@
+# PsyQ functions replaced by native HLE implementations (hle_<name> in src/pc/*.c).
+# Everything else in the PsyQ region is recompiled from the original machine code.
+# Re-run tools/recomp.py after editing.
+
+# libc / control flow
+setjmp
+longjmp
+printf
+exit
+
+# libgpu
+ResetGraph
+SetGraphDebug
+SetDispMask
+DrawSync
+DrawOTag
+DrawPrim
+PutDrawEnv
+PutDispEnv
+LoadImage
+StoreImage
+MoveImage
+ClearImage
+
+# libetc
+ResetCallback
+VSyncCallback
+VSync
+
+# libpad
+PadInitDirect
+PadStartCom
+PadGetState
+PadInfoMode
+PadSetAct
+PadSetActAlign
+
+# libcd
+CdInit
+CdControl
+CdControlB
+CdControlF
+CdSync
+CdReady
+CdDiskReady
+CdGetDiskType
+CdPlay
+CdRead
+CdRead2
+CdReadSync
+CdSearchFile
+
+# libsnd (silent for now)
+SsInit
+SsEnd
+SsStart
+SsSetTableSize
+SsSetTickMode
+SsSetMVol
+SsSetSerialAttr
+SsSetSerialVol
+SsSetStereo
+SsSetMono
+SsVabTransfer
+SsVabClose
+SsSeqOpen
+SsSeqClose
+SsSeqPlay
+SsSeqStop
+SsSeqPause
+SsSeqSetVol
+SsIsEos
+SsUtAllKeyOff
+SsUtKeyOn
+SsUtSetReverbType
+SsUtSetReverbDepth
+SsUtGetVBaddrInSB
+
+# libmcrd (no card yet)
+MemCardInit
+MemCardStart
+MemCardStop
+MemCardExist
+MemCardAccept
+MemCardReadFile
+MemCardWriteFile
+MemCardCreateFile
+MemCardFormat
+MemCardGetDirentry
+MemCardSync
+
+# libpress / streaming (movies: TODO)
+DecDCTReset
+DecDCTvlcBuild
+DecDCTin
+DecDCTout
+DecDCToutCallback
+DecDCTvlc2
+StSetRing
+StSetStream
+StGetNext
+StFreeRing
+StUnSetRing
+StCdInterrupt
+StGetBackloc
+
+# game code (not PsyQ)
+strNext   # movie player: skipped until the MDEC/STR decoder exists
+CdLastCom

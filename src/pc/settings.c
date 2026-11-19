@@ -1,0 +1,54 @@
+/* User settings (sound volumes), persisted in the OS per-user config folder:
+ *   macOS: ~/Library/Application Support/PortGamePC/Brigandine/settings.cfg
+ *   Windows: %APPDATA%\PortGamePC\Brigandine\settings.cfg
+ * Priority: environment variable (BRIG_BGM_VOLUME / BRIG_SFX_VOLUME / BRIG_MOVIE_VOLUME) > file > default. */
+#include "settings.h"
+#include <SDL.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+Settings g_settings = { 30, 100, 50 };   /* BGM 30% matches the emulator balance (user-tested); movies 50% (user choice) */
+extern float g_bgm_gain, g_sfx_gain, g_movie_gain;   /* audio.c */
+
+static char g_path[1024];
+
+static int clamp_pct(int v) { return v < 0 ? 0 : v > 100 ? 100 : v; }
+
+void settings_apply(void) {
+    g_bgm_gain = g_settings.bgm / 100.0f;
+    g_sfx_gain = g_settings.sfx / 100.0f;
+    g_movie_gain = g_settings.movie / 100.0f;
+}
+
+void settings_load(void) {
+    char *dir = SDL_GetPrefPath("PortGamePC", "Brigandine");
+    if (dir) { snprintf(g_path, sizeof g_path, "%ssettings.cfg", dir); SDL_free(dir); }
+    FILE *f = g_path[0] ? fopen(g_path, "r") : NULL;
+    if (f) {
+        char line[128];
+        while (fgets(line, sizeof line, f)) {
+            int v;
+            if (sscanf(line, "bgm=%d", &v) == 1) g_settings.bgm = clamp_pct(v);
+            else if (sscanf(line, "sfx=%d", &v) == 1) g_settings.sfx = clamp_pct(v);
+            else if (sscanf(line, "movie=%d", &v) == 1) g_settings.movie = clamp_pct(v);
+        }
+        fclose(f);
+    }
+    const char *e;
+    if ((e = getenv("BRIG_BGM_VOLUME"))) g_settings.bgm = atoi(e);
+    if ((e = getenv("BRIG_SFX_VOLUME"))) g_settings.sfx = atoi(e);
+    if ((e = getenv("BRIG_MOVIE_VOLUME"))) g_settings.movie = atoi(e);
+    settings_apply();
+}
+
+void settings_save(void) {
+    if (!g_path[0]) return;
+    FILE *f = fopen(g_path, "w");
+    if (!f) return;
+    fprintf(f, "# Brigandine GE native port settings (0-100)\nbgm=%d\nsfx=%d\nmovie=%d\n",
+            g_settings.bgm, g_settings.sfx, g_settings.movie);
+    fclose(f);
+}
+
+const char *settings_path(void) { return g_path; }

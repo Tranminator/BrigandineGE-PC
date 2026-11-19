@@ -1,0 +1,26 @@
+name: Brigandine GE OVER5.BIN
+sha1: 39a99478c0713fe6a2aab79b71419e073aca5837
+options:
+  basename: OVER5
+  target_path: ../extracted/disc1/OVER5.BIN
+  base_path: .
+  platform: psx
+  compiler: GCC
+  asm_path: asm/over5
+  src_path: src/over5
+  build_path: build
+  ld_script_path: over5.ld
+  symbol_addrs_path: [symbol_addrs.txt, symbol_addrs_over5.txt]
+  undefined_funcs_auto_path: undefined_funcs_auto_over5.txt
+  undefined_syms_auto_path: undefined_syms_auto_over5.txt
+  gp_value: 0x800A5FC8
+  use_legacy_include_asm: False
+segments:
+  - name: over5
+    type: code
+    start: 0x0
+    vram: 0x800B6838
+    subsegments:
+      - [0x0, data, header]
+      - [0x8, asm, code]
+  - [0x9d5c]

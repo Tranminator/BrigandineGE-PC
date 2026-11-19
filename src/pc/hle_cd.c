@@ -4,6 +4,7 @@
  * "Now Loading") stay up as long as on hardware. A virtual read head advances in
  * real time while a ReadN/ReadS streams (XA music polls it with CdlGetlocL). */
 #include "hle.h"
+#include "state.h"
 #include "audio.h"
 #include "settings.h"
 #include <stdlib.h>
@@ -170,4 +171,11 @@ void hle_CdSearchFile(Ctx *c) {
     wr32(fp + 4, size);
     for (int i = 0; i < 16; i++) wr8(fp + 8 + i, i < (int)strlen(name) ? (u8)name[i] : 0);
     c->r[2] = fp;
+}
+
+/* save state */
+void cd_state(StateIO *s) {
+    ST(s, g_cd_pos); ST(s, g_cd_mode); ST(s, g_cd_reading); ST(s, g_cd_frac); ST(s, g_cd_lastcom);
+    ST(s, g_xa_file); ST(s, g_xa_chan); ST(s, g_cd_result); ST(s, g_head); ST(s, g_read_done_vb);
+    ST(s, g_read_last_poll); ST(s, g_read_sectors_per_vb10);
 }

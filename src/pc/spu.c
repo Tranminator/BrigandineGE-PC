@@ -4,6 +4,7 @@
  * Reverb: algorithmic (Freeverb-style) approximation of the SPU presets, fed only by
  * voices whose tone has the reverb flag (VagAtr.mode & 4), like the real SPU. */
 #include "spu.h"
+#include "state.h"
 #include "audio.h"
 #include <math.h>
 #include <stdlib.h>
@@ -645,3 +646,23 @@ void spu_debug_dump(u32 vb) {
 }
 
 void spu_set_mono(int mono) { g_mono = mono; }
+
+/* save state. Called with the audio lock held. Reverb tails are cleared on load. */
+void spu_state(StateIO *s) {
+    st_io(s, g_spu_ram, sizeof g_spu_ram);
+    ST(s, g_spu_alloc); ST(s, g_master_l); ST(s, g_master_r); ST(s, g_mono); ST(s, g_age);
+    ST(s, g_voice); ST(s, g_seq);
+    for (int i = 0; i < NVABS; i++) {
+        Vab *v = &g_vab[i];
+        ST(s, v->used);
+        if (s->load && v->hdr) { free(v->hdr); v->hdr = NULL; }
+        if (!v->used) continue;
+        ST(s, v->ps); ST(s, v->mvol); ST(s, v->mpan); ST(s, v->base); ST(s, v->vag_off); ST(s, v->tone_block);
+        u32 hsize = 32 + 128 * 16 + (u32)v->ps * 512 + 512;
+        if (s->load) v->hdr = malloc(hsize);
+        st_io(s, v->hdr, hsize);
+    }
+    int type = g_rev_type; float dl = g_rev_depth_l, dr = g_rev_depth_r;
+    ST(s, type); ST(s, dl); ST(s, dr);
+    if (s->load) { reverb_configure(type); reverb_clear(); g_rev_depth_l = dl; g_rev_depth_r = dr; }
+}

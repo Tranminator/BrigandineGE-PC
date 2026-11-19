@@ -1,5 +1,6 @@
 /* Software PS1 GPU: VRAM 1024x512x16bpp, GP0 command processing, rasterizer. */
 #include "gpu.h"
+#include "state.h"
 #include "rt.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -322,4 +323,11 @@ void gpu_gp0_stream(const u32 *w, int n) {
         gpu_gp0_packet(&w[i], len);
         i += len;
     }
+}
+
+/* save state */
+void gpu_state(StateIO *s) {
+    st_io(s, g_vram, sizeof g_vram);
+    ST(s, g_gpu);
+    if (s->load) g_gpu_skip_draw = 0;
 }

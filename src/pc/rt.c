@@ -1,5 +1,6 @@
 /* Core runtime: memory map, call dispatch, COP0, syscalls, BIOS HLE, setjmp. */
 #include "rt.h"
+#include "state.h"
 #include "recomp_funcs.h"
 #include <stdarg.h>
 #include <stdio.h>
@@ -126,11 +127,26 @@ void rt_syscall(Ctx *c, u32 pc) {
     }
 }
 
-/* ------------------------------------------------------------------ setjmp/longjmp
- * Host setjmp lives in the recompiled caller; PSX jmp_buf address keys the host buffer. */
+/* ------------------------------------------------------------------ resume loop, setjmp/longjmp
+ * rt_resume_at() abandons the host call stack and continues guest execution at a PSX
+ * address from main()'s resume loop (interpreter for the rest of the interrupted
+ * function; each guest return then continues at the caller's saved $ra, and every
+ * call made from there runs recompiled code again). Used by the game's longjmp and
+ * by loading a save state. */
+jmp_buf g_resume_jb;
+u32 g_resume_pc;
+
+void rt_resume_at(Ctx *c, u32 pc) {
+    (void)c;
+    g_resume_pc = pc;
+    longjmp(g_resume_jb, 1);
+}
+
+/* PsyQ setjmp(jmp_buf) / longjmp(jmp_buf, val): the PSX jmp_buf address keys a slot
+ * holding the guest registers at the setjmp call ($ra = where setjmp returns). */
 #define MAX_JMP 8
-static struct { u32 psx; jmp_buf jb; u32 regs[32]; u32 ret; } g_jmp[MAX_JMP];
-static int g_jmp_last = -1;
+typedef struct { u32 psx; u32 regs[32]; } JmpSlot;
+static JmpSlot g_jmp[MAX_JMP];
 
 static int jmp_slot(u32 psx) {
     for (int i = 0; i < MAX_JMP; i++) if (g_jmp[i].psx == psx) return i;
@@ -139,25 +155,18 @@ static int jmp_slot(u32 psx) {
     return 0;
 }
 
-jmp_buf *rt_jmpbuf(Ctx *c, u32 psx) { (void)c; return &g_jmp[jmp_slot(psx)].jb; }
-
 void hle_setjmp(Ctx *c) {
     int s = jmp_slot(c->r[4]);
     memcpy(g_jmp[s].regs, c->r, sizeof c->r);
     c->r[2] = 0;
 }
 
-void rt_longjmp_restore(Ctx *c) {
-    int s = g_jmp_last;
-    memcpy(c->r, g_jmp[s].regs, sizeof c->r);
-    c->r[2] = g_jmp[s].ret;
-}
-
 void hle_longjmp(Ctx *c) {
     int s = jmp_slot(c->r[4]);
-    g_jmp[s].ret = c->r[5] ? c->r[5] : 1;
-    g_jmp_last = s;
-    longjmp(g_jmp[s].jb, 1);
+    u32 val = c->r[5] ? c->r[5] : 1;
+    memcpy(c->r, g_jmp[s].regs, sizeof c->r);
+    c->r[2] = val;
+    rt_resume_at(c, c->r[31]);
 }
 
 /* ------------------------------------------------------------------ BIOS */
@@ -213,4 +222,12 @@ void bios_call(Ctx *c, u32 table) {
     }
     rt_log("BIOS %02X:%02X unimplemented (ra=0x%08X)", table, fn, c->r[31]);
     c->r[2] = 0;
+}
+
+/* ------------------------------------------------------------------ save state */
+void rt_state(StateIO *s) {
+    st_io(s, g_ram, sizeof g_ram);
+    st_io(s, g_scratch, sizeof g_scratch);
+    ST(s, g_jmp);
+    ST(s, g_heap_base); ST(s, g_heap_size); ST(s, g_heap_ptr);
 }

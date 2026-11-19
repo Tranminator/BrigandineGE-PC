@@ -15,6 +15,7 @@
 
 extern "C" {
 #include "rt.h"
+#include "state.h"
 }
 
 #define ROM_BASE   0xBFC66000u   // where the real BIOS keeps its font
@@ -214,5 +215,15 @@ extern "C" void kanji_selftest(void) {
             }
             putchar('\n');
         }
+    }
+}
+
+// save state: the code->slot table (addresses handed to the game must stay valid)
+extern "C" void kanji_state(StateIO *s) {
+    ST(s, s_count);
+    st_io(s, s_code, sizeof s_code);
+    if (s->load) {
+        if (!s_font_state) load_font();
+        for (int i = 0; i < s_count; i++) render(sjis_to_unicode(s_code[i]), s_rom + i * GLYPH_SZ);
     }
 }

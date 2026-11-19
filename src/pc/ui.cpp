@@ -16,6 +16,8 @@ static SDL_Window *s_win;
 static SDL_Renderer *s_ren;
 static bool s_open;
 static bool s_ready;
+static char s_toast[128];
+static Uint32 s_toast_until;
 
 static const char *FONT_CANDIDATES[] = {
     "/System/Library/Fonts/Supplemental/Arial.ttf",      // macOS
@@ -55,6 +57,22 @@ extern "C" void ui_init(SDL_Window *win, SDL_Renderer *ren) {
 }
 
 extern "C" int ui_is_open(void) { return s_open; }
+
+extern "C" void ui_toast(const char *msg) {
+    snprintf(s_toast, sizeof s_toast, "%s", msg);
+    s_toast_until = SDL_GetTicks() + 2000;
+}
+
+static void toast_overlay(void) {
+    if (!s_toast[0] || SDL_GetTicks() > s_toast_until) return;
+    ImGuiIO &io = ImGui::GetIO();
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - 12, io.DisplaySize.y - 12), ImGuiCond_Always, ImVec2(1, 1));
+    ImGui::SetNextWindowBgAlpha(0.7f);
+    ImGuiWindowFlags fl = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs |
+                          ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoSavedSettings;
+    if (ImGui::Begin("##toast", nullptr, fl)) ImGui::TextUnformatted(s_toast);
+    ImGui::End();
+}
 
 static void close_ui(void) { s_open = false; settings_save(); }
 
@@ -153,11 +171,13 @@ static void perf_overlay(void) {
 }
 
 extern "C" void ui_frame(void) {
-    if (!s_ready || (!s_open && !g_settings.show_perf)) return;
+    bool toast = s_toast[0] && SDL_GetTicks() <= s_toast_until;
+    if (!s_ready || (!s_open && !g_settings.show_perf && !toast)) return;
     ImGui_ImplSDLRenderer2_NewFrame();
     ImGui_ImplSDL2_NewFrame();
     ImGui::NewFrame();
     if (g_settings.show_perf) perf_overlay();
+    toast_overlay();
     if (s_open) {
         ImGuiIO &io = ImGui::GetIO();
         ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));

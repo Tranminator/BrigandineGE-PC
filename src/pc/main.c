@@ -41,7 +41,17 @@ int main(int argc, char **argv) {
     if (!audio_init()) fprintf(stderr, "audio init failed (continuing silent)\n");
     gpu_reset();
     g_ctx.r[29] = 0x801FFF00u;
-    f_main_8006C4EC(&g_ctx);
+    void interp_run(Ctx *c, u32 pc);
+    if (setjmp(g_resume_jb) == 0) {
+        f_main_8006C4EC(&g_ctx);                      /* normal boot */
+    } else {
+        /* resumed (game longjmp or save-state load): run the interrupted guest function to
+         * its return, then keep unwinding through the callers' saved return addresses */
+        for (;;) {
+            interp_run(&g_ctx, g_resume_pc);
+            g_resume_pc = g_ctx.r[31];
+        }
+    }
     fprintf(stderr, "entry point returned\n");
     return 0;
 }

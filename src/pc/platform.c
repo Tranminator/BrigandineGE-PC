@@ -4,6 +4,7 @@
 #include "gpu.h"
 #include "settings.h"
 #include "ui.h"
+#include "state.h"
 #include <SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -185,6 +186,8 @@ void platform_vblank(void) {
         if (e.type == SDL_QUIT) g_quit = 1;
         if (ui_event(&e)) continue;                   /* settings UI (F2) consumed it */
         if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_F1) g_show_vram ^= 1;
+        if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.sym == SDLK_F5) state_request_save(state_slot());
+        if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.sym == SDLK_F9) state_request_load(state_slot());
         if ((e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) && !e.key.repeat && getenv("BRIG_TRACE")) {
             SDL_Keycode kc = e.key.keysym.sym;
             if (kc == SDLK_UP || kc == SDLK_DOWN || kc == SDLK_LEFT || kc == SDLK_RIGHT)

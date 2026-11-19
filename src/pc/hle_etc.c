@@ -1,6 +1,7 @@
 /* HLE for libetc (VSync/callbacks), libpad, libc I/O, and temporary stubs for
  * libsnd / libmcrd / libpress / streaming until the real backends exist. */
 #include "hle.h"
+#include "state.h"
 #include <SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -67,6 +68,7 @@ void hle_VSync(Ctx *c) {
     int n = mode == 0 ? 1 : mode;
     for (int i = 0; i < n; i++) hle_vblank_tick(c);
     c->r[2] = 0;
+    if (!g_in_vblank_cb) state_vsync_point(c);   /* save/load requests run here (safe point) */
 }
 
 /* ---------------------------------------------------------------- libpad */
@@ -144,3 +146,9 @@ void hle_SsSetSerialVol(Ctx *c) {
 STUB(DecDCTReset, 0) STUB(DecDCTvlcBuild, 0) STUB(DecDCTin, 0) STUB(DecDCTout, 0) STUB(DecDCToutCallback, 0)
 STUB(DecDCTvlc2, 0) STUB(StSetRing, 0) STUB(StSetStream, 0) STUB(StGetNext, 1) STUB(StFreeRing, 0)
 STUB(StUnSetRing, 0) STUB(StCdInterrupt, 0) STUB(StGetBackloc, 0)
+
+/* save state */
+void etc_state(StateIO *s) {
+    ST(s, g_vblank_count); ST(s, g_vsync_cb); ST(s, g_pad_buf);
+    if (s->load) g_in_vblank_cb = 0;
+}

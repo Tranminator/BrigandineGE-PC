@@ -100,8 +100,9 @@ void rt_mtc0(Ctx *c, int r, u32 v);
 void rt_rfe(Ctx *c);
 void rt_bad_insn(Ctx *c, u32 pc, u32 w);
 void rt_bad_label(Ctx *c, u32 pc);
-jmp_buf *rt_jmpbuf(Ctx *c, u32 psx_buf);
-void rt_longjmp_restore(Ctx *c);
+void rt_resume_at(Ctx *c, u32 pc);   /* continue guest execution at pc (never returns) */
+extern jmp_buf g_resume_jb;
+extern u32 g_resume_pc;
 
 /* GTE (gte.c) */
 u32  gte_mfc2(Ctx *c, int r);

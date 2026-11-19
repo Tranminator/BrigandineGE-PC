@@ -1,6 +1,7 @@
 /* Audio output: SDL device + mixer. Sources: XA-ADPCM stream (CD audio) and the
  * SPU synth (spu.c). Sample rate 44100 Hz stereo s16. */
 #include "audio.h"
+#include "state.h"
 #include <SDL.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -200,4 +201,11 @@ int xa_decode_sector(const u8 *raw, s16 *out, int *rate) {
     }
     for (int i = 0; i < n_m; i++) { out[i * 2] = out[i * 2 + 1] = mono[i]; }
     return n_m;
+}
+
+/* save state (the XA ring itself is flushed on load) */
+void audio_state(StateIO *s) {
+    int l = g_cd_vol_l, r = g_cd_vol_r;
+    ST(s, l); ST(s, r); ST(s, g_hist);
+    if (s->load) { g_cd_vol_l = l; g_cd_vol_r = r; g_xa_movie = 0; }
 }

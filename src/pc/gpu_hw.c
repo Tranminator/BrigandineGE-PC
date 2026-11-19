@@ -31,7 +31,7 @@ static int s_scale = 1, s_max_scale = 8, s_ready, s_need_resync = 1;
 static GLuint s_native, s_scaled, s_fbo, s_tmp, s_tmp_fbo, s_disp, s_disp_fbo;
 static int s_disp_w, s_disp_h, s_tmp_w, s_tmp_h;
 static GLuint s_prog, s_copy_prog, s_vao, s_vbo;
-static GLint u_vram, u_mode, u_pass, uc_vram, uc_scale;
+static GLint u_vram, u_mode, u_pass, u_hscale, uc_vram, uc_scale;
 
 /* ------------------------------------------------------------------ shaders */
 static const char VS[] =
@@ -52,7 +52,7 @@ static const char VS[] =
 static const char FS[] =
     "#version 330 core\n"
     "flat in uvec4 v_info; noperspective in vec4 v_col; noperspective in vec2 v_uv;\n"
-    "uniform usampler2D u_vram; uniform int u_mode; uniform int u_pass;\n"
+    "uniform usampler2D u_vram; uniform int u_mode; uniform int u_pass; uniform float u_scale;\n"
     "layout(location = 0, index = 0) out vec4 o_col;\n"
     "layout(location = 0, index = 1) out vec4 o_fac;\n"
     "uint vram(int x, int y) { return texelFetch(u_vram, ivec2(x & 1023, y & 511), 0).r; }\n"
@@ -72,18 +72,28 @@ static const char FS[] =
     "}\n"
     "vec3 rgb8(uint t) { return vec3(float(t & 31u), float((t >> 5) & 31u), float((t >> 10) & 31u)) * 8.0; }\n"
     "void main() {\n"
+    /* geometry is not shifted (edges line up with sprites), but the PS1 evaluates UV and colour
+     * at the pixel's top-left corner: take the value half a native pixel up-left */
+    "  vec2 gx = dFdx(v_uv) * u_scale, gy = dFdy(v_uv) * u_scale;\n"   /* UV change per native pixel */
+    "  vec2 uv = v_uv - 0.5 * (gx + gy);\n"
+    /* axis-aligned one-texel-per-pixel mappings (UI, text, sprites drawn as polygons): round, so
+     * texel edges stay on native pixel edges; everything else (skewed terrain, 3D): floor */
+    "  bvec2 unit = bvec2(abs(abs(gx.x) + abs(gy.x) - 1.0) < 0.002 && min(abs(gx.x), abs(gy.x)) < 0.002,\n"
+    "                     abs(abs(gx.y) + abs(gy.y) - 1.0) < 0.002 && min(abs(gx.y), abs(gy.y)) < 0.002);\n"
+    "  uv = floor(uv + mix(vec2(0.0), vec2(0.5), unit));\n"
+    "  vec3 vc = v_col.rgb - (dFdx(v_col.rgb) + dFdy(v_col.rgb)) * (0.5 * u_scale);\n"
     "  uint flags = v_info.x >> 16;\n"
     "  bool semi = (flags & 4u) != 0u, mbit = (flags & 8u) != 0u, st;\n"
     "  vec3 c;\n"
     "  if ((flags & 1u) != 0u) {\n"
-    "    uint t = texel(int(floor(v_uv.x)), int(floor(v_uv.y)));\n"
+    "    uint t = texel(int(uv.x), int(uv.y));\n"
     "    if (t == 0u) discard;\n"
     "    vec3 tc = rgb8(t);\n"
-    "    c = (flags & 2u) != 0u ? tc : min(tc * floor(v_col.rgb * 255.0 + 0.5) / 128.0, vec3(255.0));\n"
+    "    c = (flags & 2u) != 0u ? tc : min(tc * floor(clamp(vc, 0.0, 1.0) * 255.0 + 0.5) / 128.0, vec3(255.0));\n"
     "    st = semi && (t & 0x8000u) != 0u;\n"
     "    mbit = mbit || (t & 0x8000u) != 0u;\n"
     "  } else {\n"
-    "    c = floor(v_col.rgb * 255.0 + 0.5);\n"
+    "    c = floor(clamp(vc, 0.0, 1.0) * 255.0 + 0.5);\n"
     "    st = semi;\n"
     "  }\n"
     /* the PS1 truncates computed (non-raw) colours to 5 bits per channel, 3.5/255 lost on
@@ -220,6 +230,7 @@ static void flush(void) {
     glUseProgram(s_prog);
     glUniform1i(u_vram, 0);
     glUniform1i(u_mode, s_batch_mode < 0 ? 0 : s_batch_mode);
+    glUniform1f(u_hscale, (float)s_scale);
     glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(s_nverts * sizeof(Vert)), s_verts, GL_STREAM_DRAW);
     if (s_batch_mode == 2) {
         glDisable(GL_BLEND);
@@ -324,6 +335,7 @@ static int init_once(void) {
     u_vram = glGetUniformLocation(s_prog, "u_vram");
     u_mode = glGetUniformLocation(s_prog, "u_mode");
     u_pass = glGetUniformLocation(s_prog, "u_pass");
+    u_hscale = glGetUniformLocation(s_prog, "u_scale");
     uc_vram = glGetUniformLocation(s_copy_prog, "u_vram");
     uc_scale = glGetUniformLocation(s_copy_prog, "u_scale");
 
@@ -470,8 +482,9 @@ void hw_poly(const HwV *v, int nv, int gouraud, int textured, int raw, int semi,
         Vert *o = alloc_verts(3);
         for (int k = 0; k < 3; k++) {
             const HwV *p = p3[k];
-            /* +0.5: the PS1 samples coverage, colour and UV at the pixel's integer corner */
-            put_vert(&o[k], p->x + 0.5f, p->y + 0.5f, gouraud ? p->r : v[0].r, gouraud ? p->g : v[0].g,
+            /* no half-pixel shift: polygons must line up exactly with sprites at high resolution
+             * (a shifted edge leaves a half-native-pixel gap next to a sprite) */
+            put_vert(&o[k], (float)p->x, (float)p->y, gouraud ? p->r : v[0].r, gouraud ? p->g : v[0].g,
                      gouraud ? p->b : v[0].b, (float)p->u, (float)p->v, info);
         }
     }
@@ -509,25 +522,28 @@ void hw_rect(int x, int y, int w, int h, int r, int g, int b, int textured, int 
 void hw_line(HwV a, HwV b, int gouraud, int semi) {
     if (!ready()) return;
     int dx = abs(b.x - a.x), dy = abs(b.y - a.y);
-    if (dx > 1023 || dy > 511) return;
+    int n = dx > dy ? dx : dy;
+    if (n > 1023) return;
     begin_prim(semi ? g_gpu.semi_mode : -1);
     u32 flags = (semi ? 4u : 0) | (g_gpu.mask_set ? 8u : 0);
     u32 info[4] = { flags << 16, 0, 0, 0 };
-    /* a one-native-pixel-wide quad through the pixel centres, ends extended to cover both end pixels */
-    float ax = a.x + 0.5f, ay = a.y + 0.5f, bx = b.x + 0.5f, by = b.y + 0.5f;
-    float ex = bx - ax, ey = by - ay;
-    float len = SDL_sqrtf(ex * ex + ey * ey);
-    float ux = len > 0 ? ex / len : 1.0f, uy = len > 0 ? ey / len : 0.0f;
-    float nx = -uy * 0.5f, ny = ux * 0.5f;
-    ax -= ux * 0.5f; ay -= uy * 0.5f; bx += ux * 0.5f; by += uy * 0.5f;
-    int br = gouraud ? b.r : a.r, bg = gouraud ? b.g : a.g, bb = gouraud ? b.b : a.b;
-    Vert *o = alloc_verts(6);
-    put_vert(&o[0], ax + nx, ay + ny, a.r, a.g, a.b, 0, 0, info);
-    put_vert(&o[1], ax - nx, ay - ny, a.r, a.g, a.b, 0, 0, info);
-    put_vert(&o[2], bx + nx, by + ny, br, bg, bb, 0, 0, info);
-    put_vert(&o[3], ax - nx, ay - ny, a.r, a.g, a.b, 0, 0, info);
-    put_vert(&o[4], bx - nx, by - ny, br, bg, bb, 0, 0, info);
-    put_vert(&o[5], bx + nx, by + ny, br, bg, bb, 0, 0, info);
+    /* exactly the pixels the PS1 (and gpu.c) draws, one native-pixel quad each: a thinner or
+     * wider line would leave slivers when the game later redraws just those pixels */
+    Vert *o = alloc_verts((n + 1) * 6);
+    for (int i = 0; i <= n; i++) {
+        int x = n ? a.x + (b.x - a.x) * i / n : a.x;
+        int y = n ? a.y + (b.y - a.y) * i / n : a.y;
+        int r = a.r, g = a.g, bl = a.b;
+        if (gouraud && n) { r += (b.r - a.r) * i / n; g += (b.g - a.g) * i / n; bl += (b.b - a.b) * i / n; }
+        float x0 = (float)x, y0 = (float)y, x1 = x0 + 1, y1 = y0 + 1;
+        put_vert(&o[0], x0, y0, r, g, bl, 0, 0, info);
+        put_vert(&o[1], x1, y0, r, g, bl, 0, 0, info);
+        put_vert(&o[2], x0, y1, r, g, bl, 0, 0, info);
+        put_vert(&o[3], x1, y0, r, g, bl, 0, 0, info);
+        put_vert(&o[4], x1, y1, r, g, bl, 0, 0, info);
+        put_vert(&o[5], x0, y1, r, g, bl, 0, 0, info);
+        o += 6;
+    }
     HwV c[2] = { a, b };
     before_sw_write(prim_bounds(c, 2));
 }

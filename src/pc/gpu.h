@@ -11,12 +11,14 @@ typedef struct {
     int semi_mode, flip_x, flip_y;
     int tw_mw, tw_mh, tw_ox, tw_oy;
     int mask_set, mask_check;
+    int dither;                   /* E1 bit 9: dither 24-bit colours down to 15-bit */
     int disp_x, disp_y, disp_w, disp_h, disp_24bit, disp_enabled;
 } GpuState;
 
 extern u16 g_vram[VRAM_W * VRAM_H];
 extern GpuState g_gpu;
-extern int g_gpu_skip_draw;   /* frame skip: drop draw primitives, keep state + VRAM transfers */
+extern int g_gpu_skip_draw;
+extern int g_gpu_dump;   /* frame skip: drop draw primitives, keep state + VRAM transfers */
 
 void gpu_reset(void);
 int  gp0_len(u32 cmd);

@@ -2,10 +2,12 @@
 #include "gpu.h"
 #include "rt.h"
 #include <stdlib.h>
+#include <stdio.h>
 
 u16 g_vram[VRAM_W * VRAM_H];
 GpuState g_gpu;
 int g_gpu_skip_draw;
+int g_gpu_dump;   /* debug: log every GP0 packet while set (BRIG_GPUDUMP=<vblank>) */
 
 static inline int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
@@ -65,6 +67,22 @@ static inline u16 modulate(u16 t, int r, int g, int b) {
     return (u16)(clampi(tr, 0, 31) | (clampi(tg, 0, 31) << 5) | (clampi(tb, 0, 31) << 10) | (t & 0x8000));
 }
 
+/* PS1 dither matrix, added to 8-bit components before truncation to 5 bits */
+static const s8 DITHER[4][4] = { { -4, 0, -3, 1 }, { 2, -2, 3, -1 }, { -3, 1, -4, 0 }, { 3, -1, 2, -2 } };
+
+static inline u16 rgb24to15_dither(int r, int g, int b, int x, int y) {
+    int d = DITHER[y & 3][x & 3];
+    r += d; g += d; b += d;
+    return (u16)((clampi(r, 0, 255) >> 3) | ((clampi(g, 0, 255) >> 3) << 5) | ((clampi(b, 0, 255) >> 3) << 10));
+}
+
+/* texture * colour in 8-bit precision with dithering (texture-blended polygons) */
+static inline u16 modulate_dither(u16 t, int r, int g, int b, int x, int y) {
+    int d = DITHER[y & 3][x & 3];
+    int tr = ((t & 31) << 3) * r / 128 + d, tg = (((t >> 5) & 31) << 3) * g / 128 + d, tb = (((t >> 10) & 31) << 3) * b / 128 + d;
+    return (u16)((clampi(tr, 0, 255) >> 3) | ((clampi(tg, 0, 255) >> 3) << 5) | ((clampi(tb, 0, 255) >> 3) << 10) | (t & 0x8000));
+}
+
 static inline u16 rgb24to15(int r, int g, int b) {
     return (u16)((clampi(r, 0, 255) >> 3) | ((clampi(g, 0, 255) >> 3) << 5) | ((clampi(b, 0, 255) >> 3) << 10));
 }
@@ -88,9 +106,12 @@ static void draw_tri(Vtx a, Vtx b, Vtx c, int gouraud, int textured, int raw, in
             int w1 = (a.x - c.x) * (y - c.y) - (a.y - c.y) * (x - c.x);
             int w2 = (b.x - a.x) * (y - a.y) - (b.y - a.y) * (x - a.x);
             if (w0 < 0 || w1 < 0 || w2 < 0) continue;
-            if ((w0 == 0 && !(c.y > b.y || (c.y == b.y && c.x < b.x))) ||
-                (w1 == 0 && !(a.y > c.y || (a.y == c.y && a.x < c.x))) ||
-                (w2 == 0 && !(b.y > a.y || (b.y == a.y && b.x < a.x)))) continue;
+            /* PS1 fill rule: pixels exactly on an edge are drawn only for top and left edges
+             * (bottom/right edges excluded). With this winding an edge p->q is top-left when
+             * dy < 0, or dy == 0 with dx > 0. */
+#define TOPLEFT(p, q) (((q).y - (p).y) < 0 || (((q).y - (p).y) == 0 && ((q).x - (p).x) > 0))
+            if ((w0 == 0 && !TOPLEFT(b, c)) || (w1 == 0 && !TOPLEFT(c, a)) || (w2 == 0 && !TOPLEFT(a, b))) continue;
+#undef TOPLEFT
             int r = a.r, g = a.g, bl = a.b;
             if (gouraud) {
                 r = (a.r * w0 + b.r * w1 + c.r * w2) / area;
@@ -103,10 +124,10 @@ static void draw_tri(Vtx a, Vtx b, Vtx c, int gouraud, int textured, int raw, in
                 int v = (a.v * w0 + b.v * w1 + c.v * w2) / area;
                 px = texel(u, v, tp, clut);
                 if (px == 0) continue;
-                if (!raw) px = modulate(px, r, g, bl);
+                if (!raw) px = g_gpu.dither ? modulate_dither(px, r, g, bl, x, y) : modulate(px, r, g, bl);
                 plot(x, y, px, semi, 1);
             } else {
-                plot(x, y, rgb24to15(r, g, bl), semi, 0);
+                plot(x, y, (gouraud && g_gpu.dither) ? rgb24to15_dither(r, g, bl, x, y) : rgb24to15(r, g, bl), semi, 0);
             }
         }
     }
@@ -122,7 +143,7 @@ static void draw_line(Vtx a, Vtx b, int gouraud, int semi) {
         int y = n ? a.y + (b.y - a.y) * i / n : a.y;
         int r = a.r, g = a.g, bl = a.b;
         if (gouraud && n) { r += (b.r - a.r) * i / n; g += (b.g - a.g) * i / n; bl += (b.b - a.b) * i / n; }
-        plot(x, y, rgb24to15(r, g, bl), semi, 0);
+        plot(x, y, (gouraud && g_gpu.dither) ? rgb24to15_dither(r, g, bl, x, y) : rgb24to15(r, g, bl), semi, 0);
     }
 }
 
@@ -149,6 +170,7 @@ static inline int sx11(u32 v) { return ((s32)(v << 21)) >> 21; }
 
 static void set_texpage(u32 v) {
     g_gpu.texpage = v & 0x1FF;
+    g_gpu.dither = (v >> 9) & 1;
     g_gpu.semi_mode = (v >> 5) & 3;
     g_gpu.flip_x = (v >> 12) & 1;
     g_gpu.flip_y = (v >> 13) & 1;
@@ -175,6 +197,12 @@ int gp0_len(u32 cmd) {
 
 void gpu_gp0_packet(const u32 *w, int n) {
     u32 op = w[0] >> 24;
+    if (g_gpu_dump) {
+        char line[256]; int k = snprintf(line, sizeof line, "[gp0] %02X tp=%03X semi=%d dith=%d |", op, g_gpu.texpage,
+                                         g_gpu.semi_mode, g_gpu.dither);
+        for (int i = 0; i < n && i < 12 && k < 240; i++) k += snprintf(line + k, sizeof line - k, " %08X", w[i]);
+        rt_log("%s", line);
+    }
     if (op == 0x00 || op == 0x01) return;
     if (g_gpu_skip_draw && (op == 0x02 || (op >= 0x20 && op < 0x80))) return;   /* frame skip */
     if (op == 0x02) {

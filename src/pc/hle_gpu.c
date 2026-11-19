@@ -59,7 +59,8 @@ void hle_PutDrawEnv(Ctx *c) {
     if (tw.w == 0) g_gpu.tw_mw = 0;
     if (tw.h == 0) g_gpu.tw_mh = 0;
     g_gpu.tw_ox = (tw.x >> 3) & 31; g_gpu.tw_oy = (tw.y >> 3) & 31;
-    u32 e1 = 0xE1000000u | tpage;
+    /* E1 draw mode as libgpu builds it: tpage bits + dither (DRAWENV.dtd) + draw-to-display (dfe) */
+    u32 e1 = 0xE1000000u | (tpage & 0x1FF) | (rd8(e + 22) ? 1u << 9 : 0) | (rd8(e + 23) ? 1u << 10 : 0);
     gpu_gp0_packet(&e1, 1);
     if (isbg) {
         u32 fill[3] = { 0x02000000u | rd8(e + 25) | (rd8(e + 26) << 8) | (rd8(e + 27) << 16),

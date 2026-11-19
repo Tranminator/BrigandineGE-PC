@@ -1,4 +1,4 @@
-// Settings window (F2): tabs for Graphics, Sound and Controls, built with Dear ImGui.
+// Settings window (F2): tabs for Graphics, Sound, Controls, Save and System, built with Dear ImGui.
 // Changes apply immediately; closing the window (F2 / Esc / Close) saves settings.cfg.
 #include "ui.h"
 #include "imgui.h"
@@ -9,8 +9,10 @@
 
 extern "C" {
 #include "settings.h"
+#include "state.h"
 void platform_apply_video(void);
 }
+#include <time.h>
 
 static SDL_Window *s_win;
 static SDL_Renderer *s_ren;
@@ -136,7 +138,8 @@ static void tab_controls(void) {
         { "D-pad", "Arrow keys", "D-pad" }, { "Circle (confirm)", "X", "B" }, { "Cross (cancel)", "Z", "A" },
         { "Triangle", "S", "Y" }, { "Square", "A", "X" }, { "L1 / R1", "Q / E", "LB / RB" },
         { "L2 / R2", "1 / 3", "LT / RT" }, { "Start / Select", "Enter / Backspace", "Start / Back" },
-        { "Fast-forward (hold)", "Tab", "" }, { "This window", "F2", "" },
+        { "Fast-forward (hold)", "Tab", "" }, { "Quick save / load", "F5 / F9", "" },
+        { "This window", "F2", "" },
     };
     if (ImGui::BeginTable("keys", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {
         ImGui::TableSetupColumn("PS1"); ImGui::TableSetupColumn("Keyboard"); ImGui::TableSetupColumn("Controller");
@@ -155,6 +158,120 @@ static void tab_system(void) {
     if (ImGui::Combo("Loading", &fl, names, IM_ARRAYSIZE(names))) g_settings.fast_load = fl;
     hint("Original: disc reads take as long as on a PS1 (2x CD drive), so loading screens such as the "
          "castle name and \"Now Loading\" stay up like on the console. Fast: data loads instantly.");
+}
+
+/* ---------------------------------------------------------------- Save tab */
+#define NSLOTS (10 + AUTO_COUNT)
+struct SlotView { int slot; int status; StateHeader h; SDL_Texture *tex; };
+static SlotView *s_slots;          /* index 0..9 manual, 10.. autosaves */
+static int s_slots_version = -1;
+
+static int slot_of(int i) { return i < 10 ? i + 1 : AUTO_BASE + (i - 9); }
+
+static void refresh_slots(void) {
+    if (!s_slots) s_slots = (SlotView *)calloc(NSLOTS, sizeof(SlotView));
+    s_slots_version = state_files_version();
+    for (int i = 0; i < NSLOTS; i++) {
+        SlotView &v = s_slots[i];
+        v.slot = slot_of(i);
+        v.status = state_read_info(v.slot, &v.h);
+        if (v.status != 1) continue;
+        if (!v.tex) v.tex = SDL_CreateTexture(s_ren, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STATIC, THUMB_W, THUMB_H);
+        if (v.tex) SDL_UpdateTexture(v.tex, nullptr, v.h.thumb, THUMB_W * 3);
+    }
+}
+
+static void slot_info(const SlotView &v, char *line1, char *line2, size_t n) {
+    if (v.status == 0) { snprintf(line1, n, "Empty"); line2[0] = 0; return; }
+    if (v.status < 0) { snprintf(line1, n, "Made by another version of the port"); line2[0] = 0; return; }
+    time_t t = (time_t)v.h.time;
+    struct tm *lt = localtime(&t);
+    char when[64] = "";
+    if (lt) strftime(when, sizeof when, "%Y-%m-%d  %H:%M", lt);
+    snprintf(line1, n, "%s", when);
+    if (!v.h.in_game) snprintf(line2, n, "Title / menu");
+    else snprintf(line2, n, "Year %u, Month %u  -  %s", v.h.year, v.h.month,
+                  v.h.battle ? "Battle" : v.h.phase ? "Attack phase" : "Organize phase");
+}
+
+static void tab_save(void) {
+    if (s_slots_version != state_files_version() || !s_slots) refresh_slots();
+    static int confirm_slot = 0, confirm_kind = 0;    /* 1 overwrite, 2 delete */
+
+    bool as = g_settings.autosave != 0;
+    if (ImGui::Checkbox("Autosave", &as)) { g_settings.autosave = as; state_reset_autosave_tracking(); }
+    ImGui::SameLine();
+    ImGui::TextDisabled("at each new phase and when a battle starts (3 rotating slots)");
+    hint("F5 saves to the selected slot, F9 loads it. Click a slot to select it. "
+         "Memory card saves in the game's own menu still work and stay compatible with emulators.");
+
+    const float th = 72.0f, tw = th * THUMB_W / THUMB_H;
+    ImGui::BeginChild("slots", ImVec2(0, 380), ImGuiChildFlags_Borders);
+    for (int i = 0; i < NSLOTS; i++) {
+        SlotView &v = s_slots[i];
+        bool manual = v.slot <= 10;
+        if (i == 10) { ImGui::Spacing(); ImGui::SeparatorText("Autosaves"); }
+        ImGui::PushID(v.slot);
+        ImVec2 p0 = ImGui::GetCursorScreenPos();
+        bool selected = manual && v.slot == state_slot();
+        if (ImGui::Selectable("##row", selected, ImGuiSelectableFlags_AllowOverlap, ImVec2(0, th)) && manual)
+            state_set_slot(v.slot);
+        ImGui::SetCursorScreenPos(p0);
+        if (v.status == 1 && v.tex) ImGui::Image((ImTextureID)(intptr_t)v.tex, ImVec2(tw, th));
+        else {
+            ImVec2 a = ImGui::GetCursorScreenPos();
+            ImGui::GetWindowDrawList()->AddRect(a, ImVec2(a.x + tw, a.y + th), ImGui::GetColorU32(ImGuiCol_Border), 3.0f);
+            ImGui::Dummy(ImVec2(tw, th));
+        }
+        ImGui::SameLine();
+        ImGui::BeginGroup();
+        char name[32], l1[96], l2[96];
+        state_slot_name(v.slot, name, sizeof name);
+        slot_info(v, l1, l2, sizeof l1);
+        ImGui::TextUnformatted(name);
+        ImGui::TextDisabled("%s", l1);
+        if (l2[0]) ImGui::TextUnformatted(l2);
+        ImGui::EndGroup();
+
+        float bw = 64.0f, right = ImGui::GetWindowContentRegionMax().x;
+        ImGui::SameLine(right - bw * 3 - 16);
+        ImGui::BeginGroup();
+        ImGui::Dummy(ImVec2(0, th * 0.5f - ImGui::GetFrameHeight() * 0.5f - 4));
+        if (manual) {
+            if (ImGui::Button("Save", ImVec2(bw, 0))) {
+                state_set_slot(v.slot);
+                if (v.status == 0) state_request_save(v.slot);
+                else { confirm_slot = v.slot; confirm_kind = 1; ImGui::OpenPopup("confirm"); }
+            }
+        } else ImGui::Dummy(ImVec2(bw, 0));
+        ImGui::SameLine();
+        ImGui::BeginDisabled(v.status != 1);
+        if (ImGui::Button("Load", ImVec2(bw, 0))) {
+            if (manual) state_set_slot(v.slot);
+            state_request_load(v.slot);
+            close_ui();
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(v.status == 0);
+        if (ImGui::Button("Delete", ImVec2(bw, 0))) { confirm_slot = v.slot; confirm_kind = 2; ImGui::OpenPopup("confirm"); }
+        ImGui::EndDisabled();
+        ImGui::EndGroup();
+
+        if (ImGui::BeginPopupModal("confirm", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            char nm[32]; state_slot_name(confirm_slot, nm, sizeof nm);
+            ImGui::Text(confirm_kind == 1 ? "Overwrite %s?" : "Delete %s?", nm);
+            if (ImGui::Button(confirm_kind == 1 ? "Overwrite" : "Delete", ImVec2(110, 0))) {
+                if (confirm_kind == 1) state_request_save(confirm_slot); else state_request_delete(confirm_slot);
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel", ImVec2(110, 0))) ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+        ImGui::PopID();
+    }
+    ImGui::EndChild();
 }
 
 static void perf_overlay(void) {
@@ -181,7 +298,7 @@ extern "C" void ui_frame(void) {
     if (s_open) {
         ImGuiIO &io = ImGui::GetIO();
         ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-        ImGui::SetNextWindowSize(ImVec2(560, 0), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(620, 0), ImGuiCond_Always);
         bool keep = true;
         if (ImGui::Begin("Settings", &keep, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize)) {
             if (ImGui::BeginTabBar("tabs")) {
@@ -191,7 +308,8 @@ extern "C" void ui_frame(void) {
                 if (ImGui::BeginTabItem("Graphics", nullptr, sel(0))) { tab_graphics(); ImGui::EndTabItem(); }
                 if (ImGui::BeginTabItem("Sound", nullptr, sel(1))) { tab_sound(); ImGui::EndTabItem(); }
                 if (ImGui::BeginTabItem("Controls", nullptr, sel(2))) { tab_controls(); ImGui::EndTabItem(); }
-                if (ImGui::BeginTabItem("System", nullptr, sel(3))) { tab_system(); ImGui::EndTabItem(); }
+                if (ImGui::BeginTabItem("Save", nullptr, sel(3))) { tab_save(); ImGui::EndTabItem(); }
+                if (ImGui::BeginTabItem("System", nullptr, sel(4))) { tab_system(); ImGui::EndTabItem(); }
                 want = -1;
                 ImGui::EndTabBar();
             }

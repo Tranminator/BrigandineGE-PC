@@ -53,7 +53,7 @@ cmake -S . -B build/cmake && cmake --build build/cmake -j8
 | L2 / R2 | 1 / 3 | LT / RT |
 | Start / Select | Enter / Backspace | Start / Back |
 
-`F1` shows all of VRAM (debug). Hold `Tab` to fast-forward.
+`F5` quick save, `F9` quick load (see below). `F1` shows all of VRAM (debug). Hold `Tab` to fast-forward.
 
 Settings: press `F2` (mouse, keyboard or controller; `F2`/`Esc` closes and saves). Game input is
 paused while the window is open.
@@ -62,6 +62,7 @@ paused while the window is open.
 - **Sound** — Music 30%, Sound effects 100%, Movies 50% by default (music level matches the
   emulator balance between music and menu sounds).
 - **Controls** — key / controller reference.
+- **Save** — the save slots (below) and the Autosave switch.
 - **System** — Loading: Original CD speed (default; loading screens last as long as on a PS1) or Fast.
 
 The game logic always runs at the PS1's 59.94 Hz (it counts frames), whatever the display refresh.
@@ -73,7 +74,21 @@ Debug env vars: `BRIG_TRACE=1` (per-second GPU stats), `BRIG_SHOT_DIR=<dir> BRIG
 (BMP snapshots), `BRIG_INPUT="frame:hexmask,..."` (scripted pad input), `BRIG_SHOW_VRAM=1`,
 `BRIG_CDTRACE=1` (CD commands), `BRIG_SNDTRACE=1` (libsnd calls + active SPU voices), `BRIG_WAV=<file.wav>`
 (record audio output), `BRIG_MUTE_XA=1` (SPU only), `BRIG_REVERB_ONLY=1` (reverb wet signal only), `BRIG_MUTE_SPU=1` (XA only), `BRIG_KEYS="frame:KeyName,..."` (scripted keyboard keys), `BRIG_FAST=1` (unthrottled), `BRIG_SKIP_MOVIES=1`,
-`BRIG_SHOT_FROM`/`BRIG_SHOT_TO` (snapshot range), `BRIG_SLOW_MS=<n>` (simulate a slow machine), `BRIG_UI_TAB=<0-2>`.
+`BRIG_SHOT_FROM`/`BRIG_SHOT_TO` (snapshot range), `BRIG_SLOW_MS=<n>` (simulate a slow machine), `BRIG_UI_TAB=<0-4>`, `BRIG_STATE_DIR=<dir>` (save-slot folder, for tests).
+
+## Quick save / load (save anywhere)
+The port's own save system works at any moment — on the map, in menus, in the middle of a battle —
+and loads instantly, without going back to the title screen.
+- `F5` saves to the selected slot, `F9` loads it. `F2` → **Save** shows 10 slots with a screenshot,
+  date / time and the in-game year, month and phase; click a slot to select it, or use its
+  Save / Load / Delete buttons.
+- **Autosave** (on by default): 3 rotating slots, written when you finalize the Organize phase,
+  when you finalize the Attack phase (new month), and when a battle starts.
+- Files: `~/Library/Application Support/PortGamePC/Brigandine/states/` (`slot1..10.state`,
+  `auto1..3.state`, about 3.7 MB each). They keep working after the app is restarted, but only with
+  the same disc / patch and the same version of the port.
+- These are a snapshot of the whole game, not the game's own save: to take a save to an emulator,
+  also save to the memory card from the game's menu.
 
 ## Memory cards (save / load)
 The game saves to virtual memory cards stored as **standard 128 KB raw PS1 card images** — the same

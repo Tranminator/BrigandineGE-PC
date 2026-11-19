@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-Settings g_settings = { 30, 100, 50, 1, 0, 0, 0 };   /* BGM 30% matches the emulator balance (user-tested); movies 50% (user choice) */
+Settings g_settings = { 30, 100, 50, 1, 0, 0, 0, 1 };   /* BGM 30% matches the emulator balance (user-tested); movies 50% (user choice) */
 extern float g_bgm_gain, g_sfx_gain, g_movie_gain;   /* audio.c */
 
 static char g_path[1024];
@@ -37,6 +37,7 @@ void settings_load(void) {
             else if (sscanf(line, "frameskip=%d", &v) == 1) g_settings.frameskip = clamp_range(v, 0, 4);
             else if (sscanf(line, "show_perf=%d", &v) == 1) g_settings.show_perf = v != 0;
             else if (sscanf(line, "fast_load=%d", &v) == 1) g_settings.fast_load = v != 0;
+            else if (sscanf(line, "autosave=%d", &v) == 1) g_settings.autosave = v != 0;
         }
         fclose(f);
     }
@@ -55,8 +56,10 @@ void settings_save(void) {
     FILE *f = fopen(g_path, "w");
     if (!f) return;
     fprintf(f, "# Brigandine GE native port settings\n# volumes 0-100\nbgm=%d\nsfx=%d\nmovie=%d\n"
-               "# video: vsync 0/1, frameskip 0 off / 1 auto / 2-4 draw 1 of N, show_perf 0/1\nvsync=%d\nframeskip=%d\nshow_perf=%d\n",
-            g_settings.bgm, g_settings.sfx, g_settings.movie, g_settings.vsync, g_settings.frameskip, g_settings.show_perf);
+               "# video: vsync 0/1, frameskip 0 off / 1 auto / 2-4 draw 1 of N, show_perf 0/1\nvsync=%d\nframeskip=%d\nshow_perf=%d\n"
+               "# system: fast_load 0 = original CD speed / 1 = instant, autosave 0/1\nfast_load=%d\nautosave=%d\n",
+            g_settings.bgm, g_settings.sfx, g_settings.movie, g_settings.vsync, g_settings.frameskip, g_settings.show_perf,
+            g_settings.fast_load, g_settings.autosave);
     fclose(f);
 }
 

@@ -68,6 +68,7 @@ void hle_VSync(Ctx *c) {
     int n = mode == 0 ? 1 : mode;
     for (int i = 0; i < n; i++) hle_vblank_tick(c);
     c->r[2] = 0;
+    {   static u32 last; if (getenv("BRIG_VSTRACE") && g_vblank_count - last > 30) { last = g_vblank_count; rt_log("[vsync] vb=%u mode=%d incb=%d ra=%08X", g_vblank_count, mode, g_in_vblank_cb, c->r[31]); } }
     if (!g_in_vblank_cb) state_vsync_point(c);   /* save/load requests run here (safe point) */
 }
 

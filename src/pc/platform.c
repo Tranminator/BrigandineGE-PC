@@ -66,6 +66,17 @@ static inline u32 c15(u16 p) {
     return 0xFF000000u | (r << 16) | (g << 8) | b;
 }
 
+/* 160x120 RGB snapshot of the image currently on screen (for save-state thumbnails). */
+void platform_thumbnail(u8 *rgb, int w, int h) {
+    if (!g_tex_w || !g_tex_h) { memset(rgb, 0, (size_t)w * h * 3); return; }
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            u32 p = g_frame[(y * g_tex_h / h) * g_tex_w + x * g_tex_w / w];
+            u8 *o = rgb + (y * w + x) * 3;
+            o[0] = (u8)(p >> 16); o[1] = (u8)(p >> 8); o[2] = (u8)p;
+        }
+}
+
 /* Copy the current PS1 display (or movie frame) into g_tex. */
 static void upload_frame(void) {
     int x0, y0, w, h;

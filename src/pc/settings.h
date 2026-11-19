@@ -6,6 +6,7 @@ typedef struct {
     int frameskip;                /* 0 off, 1 auto, 2..4 = draw 1 of N frames */
     int show_perf;                /* performance overlay */
     int fast_load;                /* 0 = original CD timing, 1 = instant loading */
+    int autosave;                 /* save states at each phase change and battle start */
 } Settings;
 extern Settings g_settings;
 

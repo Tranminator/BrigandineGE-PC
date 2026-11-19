@@ -10,6 +10,7 @@
  * Slot 2 (chan 0x10) = <pref>/memcard2.mcd, present only if that file exists.
  * Env overrides (tests): BRIG_MEMCARD1 / BRIG_MEMCARD2 = path. */
 #include "hle.h"
+#include "state.h"
 #include <SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -282,4 +283,9 @@ void hle_MemCardSync(Ctx *c) {
     if (A(2)) wr32(A(2), g_last_result);
     g_pending = 0;
     c->r[2] = 1;
+}
+
+/* save state: only the pending async result (card contents live on disk and are not rolled back) */
+void memcard_state(StateIO *s) {
+    ST(s, g_pending); ST(s, g_last_cmd); ST(s, g_last_result);
 }

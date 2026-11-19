@@ -10,6 +10,7 @@
 void f_main_8006C4EC(Ctx *c); /* __SN_ENTRY_POINT */
 
 static Ctx g_ctx;
+u32 g_exe_crc;   /* CRC32 of the loaded EXE: save states only load on the same disc/patch */
 
 static int load_exe(void) {
     u32 lba, size;
@@ -24,6 +25,12 @@ static int load_exe(void) {
     memcpy(&t_addr, buf + 0x18, 4);
     memcpy(&t_size, buf + 0x1C, 4);
     memcpy(ram_ptr(t_addr), buf + 0x800, t_size);
+    u32 crc = 0xFFFFFFFFu;
+    for (u32 i = 0; i < t_size; i++) {
+        crc ^= buf[0x800 + i];
+        for (int k = 0; k < 8; k++) crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1)));
+    }
+    g_exe_crc = ~crc;
     free(buf);
     return 1;
 }
@@ -41,7 +48,17 @@ int main(int argc, char **argv) {
     if (!audio_init()) fprintf(stderr, "audio init failed (continuing silent)\n");
     gpu_reset();
     g_ctx.r[29] = 0x801FFF00u;
-    f_main_8006C4EC(&g_ctx);
+    void interp_run(Ctx *c, u32 pc);
+    if (setjmp(g_resume_jb) == 0) {
+        f_main_8006C4EC(&g_ctx);                      /* normal boot */
+    } else {
+        /* resumed (game longjmp or save-state load): run the interrupted guest function to
+         * its return, then keep unwinding through the callers' saved return addresses */
+        for (;;) {
+            interp_run(&g_ctx, g_resume_pc);
+            g_resume_pc = g_ctx.r[31];
+        }
+    }
     fprintf(stderr, "entry point returned\n");
     return 0;
 }

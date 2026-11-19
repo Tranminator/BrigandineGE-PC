@@ -433,11 +433,9 @@ class FuncGen:
                 out.append(f"    {{ {ds_c} {self.goto_or_tail(t)} }}")
             elif op == 3:  # jal
                 t = (a & 0xF0000000) | ((w & 0x3FFFFFF) << 2)
-                if self.ctx["hle_by_addr"].get(t) == "setjmp":
-                    out.append(f"    {ds_c}")
-                    out.append(f"    if (setjmp(*rt_jmpbuf(c, {R}[4]))) {{ rt_longjmp_restore(c); }} else {{ hle_setjmp(c); }}")
-                else:
-                    out.append(f"    {ds_c} {R}[31] = 0x{ret:08X}u; {self.call_expr(t)}")
+                # setjmp/longjmp are plain HLE calls: longjmp resumes at the saved return
+                # address through the runtime's resume loop (rt_resume_at), no host setjmp needed
+                out.append(f"    {ds_c} {R}[31] = 0x{ret:08X}u; {self.call_expr(t)}")
             elif op == 0 and (w & 63) == 8:  # jr
                 if rs == 31:
                     out.append(f"    {{ {ds_c} return; }}")

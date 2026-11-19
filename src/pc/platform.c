@@ -4,6 +4,7 @@
 #include "gpu.h"
 #include "settings.h"
 #include "ui.h"
+#include "state.h"
 #include <SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -63,6 +64,17 @@ int platform_quit_requested(void) { return g_quit; }
 static inline u32 c15(u16 p) {
     u32 r = (p & 31) << 3, g = ((p >> 5) & 31) << 3, b = ((p >> 10) & 31) << 3;
     return 0xFF000000u | (r << 16) | (g << 8) | b;
+}
+
+/* 160x120 RGB snapshot of the image currently on screen (for save-state thumbnails). */
+void platform_thumbnail(u8 *rgb, int w, int h) {
+    if (!g_tex_w || !g_tex_h) { memset(rgb, 0, (size_t)w * h * 3); return; }
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            u32 p = g_frame[(y * g_tex_h / h) * g_tex_w + x * g_tex_w / w];
+            u8 *o = rgb + (y * w + x) * 3;
+            o[0] = (u8)(p >> 16); o[1] = (u8)(p >> 8); o[2] = (u8)p;
+        }
 }
 
 /* Copy the current PS1 display (or movie frame) into g_tex. */
@@ -151,7 +163,9 @@ static void inject_keys(void) {
         name[n] = 0;
         if (f == frame) {
             SDL_Event ev; memset(&ev, 0, sizeof ev);
-            ev.type = SDL_KEYDOWN; ev.key.keysym.sym = SDL_GetKeyFromName(name);
+            int shift = !strncmp(name, "Shift+", 6);   /* "Shift+Right" = with Left Shift held */
+            ev.type = SDL_KEYDOWN; ev.key.keysym.sym = SDL_GetKeyFromName(shift ? name + 6 : name);
+            if (shift) ev.key.keysym.mod = KMOD_LSHIFT;
             ev.key.keysym.scancode = SDL_GetScancodeFromKey(ev.key.keysym.sym);
             SDL_PushEvent(&ev);
             ev.type = SDL_KEYUP;
@@ -185,6 +199,11 @@ void platform_vblank(void) {
         if (e.type == SDL_QUIT) g_quit = 1;
         if (ui_event(&e)) continue;                   /* settings UI (F2) consumed it */
         if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_F1) g_show_vram ^= 1;
+        if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.sym == SDLK_F5) state_request_save(state_slot());
+        if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.sym == SDLK_F9) state_request_load(state_slot());
+        if (e.type == SDL_KEYDOWN && (e.key.keysym.mod & KMOD_LSHIFT) &&
+            (e.key.keysym.sym == SDLK_LEFT || e.key.keysym.sym == SDLK_RIGHT))
+            state_cycle_slot(e.key.keysym.sym == SDLK_LEFT ? -1 : 1);   /* Left Shift + arrows: save slot */
         if ((e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) && !e.key.repeat && getenv("BRIG_TRACE")) {
             SDL_Keycode kc = e.key.keysym.sym;
             if (kc == SDLK_UP || kc == SDLK_DOWN || kc == SDLK_LEFT || kc == SDLK_RIGHT)
@@ -264,10 +283,12 @@ u16 platform_pad_buttons(void) {
     if (ui_is_open()) return 0;   /* settings UI has the keyboard and pad */
     if (k[SDL_SCANCODE_BACKSPACE] || k[SDL_SCANCODE_RSHIFT]) b |= 1 << 0;
     if (k[SDL_SCANCODE_RETURN]) b |= 1 << 3;
-    if (k[SDL_SCANCODE_UP]) b |= 1 << 4;
-    if (k[SDL_SCANCODE_RIGHT]) b |= 1 << 5;
-    if (k[SDL_SCANCODE_DOWN]) b |= 1 << 6;
-    if (k[SDL_SCANCODE_LEFT]) b |= 1 << 7;
+    if (!k[SDL_SCANCODE_LSHIFT]) {   /* Left Shift + arrows changes the save slot instead */
+        if (k[SDL_SCANCODE_UP]) b |= 1 << 4;
+        if (k[SDL_SCANCODE_RIGHT]) b |= 1 << 5;
+        if (k[SDL_SCANCODE_DOWN]) b |= 1 << 6;
+        if (k[SDL_SCANCODE_LEFT]) b |= 1 << 7;
+    }
     if (k[SDL_SCANCODE_1]) b |= 1 << 8;
     if (k[SDL_SCANCODE_3]) b |= 1 << 9;
     if (k[SDL_SCANCODE_Q]) b |= 1 << 10;

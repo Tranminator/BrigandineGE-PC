@@ -29,6 +29,7 @@ static int load_exe(void) {
 }
 
 int main(int argc, char **argv) {
+    if (getenv("BRIG_KANJI_TEST")) { void kanji_selftest(void); kanji_selftest(); return 0; }   /* debug */
     if (argc < 2) {
         fprintf(stderr, "usage: %s <Brigandine GE Disc 1 .bin>\n", argv[0]);
         return 1;

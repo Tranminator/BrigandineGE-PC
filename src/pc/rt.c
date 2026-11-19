@@ -30,6 +30,8 @@ void rt_fatal(const char *fmt, ...) {
 
 /* ------------------------------------------------------------------ memory */
 u32 hw_read(u32 phys, int size);
+int kanji_rom_read(u32 phys, int size, u32 *out);   /* kanji.cpp */
+u32 kanji_krom2rawadd(u32 sjis);
 void hw_write(u32 phys, u32 v, int size);
 
 u32 mem_rd_slow(u32 a, int size) {
@@ -38,7 +40,11 @@ u32 mem_rd_slow(u32 a, int size) {
         u32 v = 0; memcpy(&v, g_scratch + (p & 0x3FF), size); return v;
     }
     if (p >= 0x1F801000u && p < 0x1F803000u) return hw_read(p, size);
-    if (p >= 0x1FC00000u) return 0; /* BIOS ROM */
+    if (p >= 0x1FC00000u) {          /* BIOS ROM: only the replacement font area exists */
+        u32 v;
+        if (kanji_rom_read(p, size, &v)) return v;
+        return 0;
+    }
     rt_log("read%d from unmapped 0x%08X", size * 8, a);
     return 0;
 }
@@ -194,6 +200,7 @@ void bios_call(Ctx *c, u32 table) {
         case 0x12: case 0x13: case 0x14: return;  /* InitPad, StartPad, StopPad */
         case 0x4A: case 0x4B: case 0x4C: return;  /* InitCard, StartCard, StopCard */
         case 0x5B: return;                        /* ChangeClearPad */
+        case 0x51: c->r[2] = kanji_krom2rawadd(a0); return; /* Krom2RawAdd: BIOS font glyph address */
         case 0x56: c->r[2] = 0x80000E00u; return; /* GetC0Table (dummy) */
         case 0x57: c->r[2] = 0x80000E80u; return; /* GetB0Table (dummy) */
         case 0x3D: putc(a0 & 0xFF, stderr); return;/* putchar */

@@ -5,6 +5,7 @@ typedef struct {
     int vsync;                    /* 1 = present on vsync */
     int frameskip;                /* 0 off, 1 auto, 2..4 = draw 1 of N frames */
     int show_perf;                /* performance overlay */
+    int fast_load;                /* 0 = original CD timing, 1 = instant loading */
 } Settings;
 extern Settings g_settings;
 

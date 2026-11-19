@@ -131,6 +131,14 @@ static void tab_controls(void) {
     }
 }
 
+static void tab_system(void) {
+    static const char *names[] = { "Original CD speed", "Fast" };
+    int fl = g_settings.fast_load;
+    if (ImGui::Combo("Loading", &fl, names, IM_ARRAYSIZE(names))) g_settings.fast_load = fl;
+    hint("Original: disc reads take as long as on a PS1 (2x CD drive), so loading screens such as the "
+         "castle name and \"Now Loading\" stay up like on the console. Fast: data loads instantly.");
+}
+
 static void perf_overlay(void) {
     ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_Always);
     ImGui::SetNextWindowBgAlpha(0.55f);
@@ -163,6 +171,7 @@ extern "C" void ui_frame(void) {
                 if (ImGui::BeginTabItem("Graphics", nullptr, sel(0))) { tab_graphics(); ImGui::EndTabItem(); }
                 if (ImGui::BeginTabItem("Sound", nullptr, sel(1))) { tab_sound(); ImGui::EndTabItem(); }
                 if (ImGui::BeginTabItem("Controls", nullptr, sel(2))) { tab_controls(); ImGui::EndTabItem(); }
+                if (ImGui::BeginTabItem("System", nullptr, sel(3))) { tab_system(); ImGui::EndTabItem(); }
                 want = -1;
                 ImGui::EndTabBar();
             }

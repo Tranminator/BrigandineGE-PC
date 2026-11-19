@@ -39,3 +39,7 @@ set_source_files_properties(${GEN_SRC} PROPERTIES COMPILE_OPTIONS "-w;-O1")
 if(NOT MSVC)
   target_compile_options(brigandine PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wno-unused-function>)
 endif()
+
+# Runtime assets (bundled OFL font for the BIOS-font replacement) next to the executable
+add_custom_command(TARGET brigandine POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:brigandine>/assets)

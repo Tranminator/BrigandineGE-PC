@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-Settings g_settings = { 30, 100, 50, 1, 0, 0 };   /* BGM 30% matches the emulator balance (user-tested); movies 50% (user choice) */
+Settings g_settings = { 30, 100, 50, 1, 0, 0, 0 };   /* BGM 30% matches the emulator balance (user-tested); movies 50% (user choice) */
 extern float g_bgm_gain, g_sfx_gain, g_movie_gain;   /* audio.c */
 
 static char g_path[1024];
@@ -36,6 +36,7 @@ void settings_load(void) {
             else if (sscanf(line, "vsync=%d", &v) == 1) g_settings.vsync = v != 0;
             else if (sscanf(line, "frameskip=%d", &v) == 1) g_settings.frameskip = clamp_range(v, 0, 4);
             else if (sscanf(line, "show_perf=%d", &v) == 1) g_settings.show_perf = v != 0;
+            else if (sscanf(line, "fast_load=%d", &v) == 1) g_settings.fast_load = v != 0;
         }
         fclose(f);
     }
@@ -45,6 +46,7 @@ void settings_load(void) {
     if ((e = getenv("BRIG_MOVIE_VOLUME"))) g_settings.movie = atoi(e);
     if ((e = getenv("BRIG_VSYNC"))) g_settings.vsync = atoi(e) != 0;
     if ((e = getenv("BRIG_FRAMESKIP"))) g_settings.frameskip = clamp_range(atoi(e), 0, 4);
+    if ((e = getenv("BRIG_FAST_LOAD"))) g_settings.fast_load = atoi(e) != 0;
     settings_apply();
 }
 

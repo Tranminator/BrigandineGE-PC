@@ -11,6 +11,7 @@ void *vgl_context(void);
 void vgl_set_vsync(int on);
 void vgl_drawable_size(int *w, int *h);
 void vgl_upload(const uint32_t *argb, int w, int h);   /* the PS1 display image (ARGB8888) */
+void vgl_use_texture(unsigned tex, int w, int h);   /* draw this texture instead (until the next upload) */
 void vgl_draw(int dx, int dy, int dw, int dh);   /* clear the window, draw the image into this rect (top-left origin) */
 int  vgl_read_pixels(uint32_t *argb, int w, int h);    /* window contents, top row first (screenshots) */
 void vgl_swap(void);

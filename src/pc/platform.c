@@ -6,6 +6,7 @@
 #include "ui.h"
 #include "state.h"
 #include "video_gl.h"
+#include "gpu_hw.h"
 #include <SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,6 +37,7 @@ void platform_set_movie_frame(const u8 *rgb, int w, int h) { g_movie_rgb = rgb; 
 void platform_apply_video(void) {
     if (!g_gl_ok) return;
     vgl_set_vsync(g_settings.vsync);
+    g_settings.render_scale = hw_set_scale(g_settings.render_scale);
     g_vsync_clock = g_settings.vsync && g_refresh_hz >= 59 && g_refresh_hz <= 61;
     g_next_frame = g_ideal = SDL_GetPerformanceCounter();
 }
@@ -43,7 +45,7 @@ void platform_apply_video(void) {
 int platform_init(const char *title) {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS) != 0) return 0;
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
@@ -52,7 +54,7 @@ int platform_init(const char *title) {
                              SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_OPENGL);
     if (!g_win) { rt_log("[video] window: %s", SDL_GetError()); return 0; }
     g_gl_ok = vgl_init(g_win);
-    if (!g_gl_ok) { rt_log("[video] OpenGL 3.2 is required: %s", SDL_GetError()); return 0; }
+    if (!g_gl_ok) { rt_log("[video] OpenGL 3.3 is required: %s", SDL_GetError()); return 0; }
     SDL_DisplayMode dm;
     g_refresh_hz = SDL_GetCurrentDisplayMode(SDL_GetWindowDisplayIndex(g_win), &dm) == 0 ? dm.refresh_rate : 0;
     for (int i = 0; i < SDL_NumJoysticks(); i++)
@@ -72,8 +74,11 @@ static inline u32 c15(u16 p) {
     return 0xFF000000u | (r << 16) | (g << 8) | b;
 }
 
+static int build_frame(void);
+
 /* 160x120 RGB snapshot of the image currently on screen (for save-state thumbnails). */
 void platform_thumbnail(u8 *rgb, int w, int h) {
+    if (g_hw_on) build_frame();           /* the hardware renderer does not fill g_frame */
     if (!g_tex_w || !g_tex_h) { memset(rgb, 0, (size_t)w * h * 3); return; }
     for (int y = 0; y < h; y++)
         for (int x = 0; x < w; x++) {
@@ -83,15 +88,15 @@ void platform_thumbnail(u8 *rgb, int w, int h) {
         }
 }
 
-/* Copy the current PS1 display (or movie frame) into g_tex. */
-static void upload_frame(void) {
+/* Convert the current PS1 display (or movie frame) into g_frame (g_tex_w x g_tex_h). */
+static int build_frame(void) {
     int x0, y0, w, h;
     if (g_show_vram) { x0 = 0; y0 = 0; w = VRAM_W; h = VRAM_H; }
     else { x0 = g_gpu.disp_x; y0 = g_gpu.disp_y; w = g_gpu.disp_w; h = g_gpu.disp_h; }
     /* movies: letterbox into a 240-line screen like the PS1 display (e.g. 320x192 -> bars top/bottom) */
     int top = 0;
     if (g_movie_rgb && !g_show_vram) { w = g_movie_w; h = g_movie_h < 240 ? 240 : g_movie_h; top = (h - g_movie_h) / 2; }
-    if (w <= 0 || h <= 0) return;
+    if (w <= 0 || h <= 0) return 0;
     if (g_movie_rgb && !g_show_vram) {
         for (int i = 0; i < w * h; i++) g_frame[i] = 0xFF000000u;
         for (int y = 0; y < g_movie_h; y++)
@@ -112,13 +117,22 @@ static void upload_frame(void) {
                 g_frame[y * w + x] = (g_gpu.disp_enabled || g_show_vram)
                     ? c15(g_vram[((y0 + y) & 511) * VRAM_W + ((x0 + x) & 1023)]) : 0xFF000000u;
     }
-    vgl_upload(g_frame, w, h);
     g_tex_w = w; g_tex_h = h;
+    return 1;
+}
+
+/* ... and upload it as the image to present */
+static void upload_frame(void) {
+    if (build_frame()) vgl_upload(g_frame, g_tex_w, g_tex_h);
 }
 
 static void present(int skipped) {
+    /* hardware renderer: the upscaled display area (movies and 24-bit screens use the software image) */
+    unsigned htex; int hw_w, hw_h;
+    if (g_hw_on && !g_movie_rgb && !g_gpu.disp_24bit && hw_display_texture(&htex, &hw_w, &hw_h, g_show_vram))
+        vgl_use_texture(htex, hw_w, hw_h);
     /* a skipped game frame left a stale buffer on screen: keep showing the previous image */
-    if (!skipped || g_movie_rgb || g_show_vram || !g_tex_w) upload_frame();
+    else if (!skipped || g_movie_rgb || g_show_vram || !g_tex_w || g_hw_on) upload_frame();
     int ow, oh;
     vgl_drawable_size(&ow, &oh);
     /* 4:3 (or VRAM 2:1) image, letterboxed in the window */

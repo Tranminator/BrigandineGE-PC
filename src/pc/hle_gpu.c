@@ -2,6 +2,7 @@
  * SetDefDrawEnv, LoadTPage...) stay recompiled; LoadTPage/LoadClut reach LoadImage here. */
 #include "gpu.h"
 #include "hle.h"
+#include "gpu_hw.h"
 #include <SDL.h>
 #include <stdlib.h>
 
@@ -83,9 +84,11 @@ void hle_PutDispEnv(Ctx *c) {
 void hle_LoadImage(Ctx *c) {
     PsxRect r = get_rect(c->r[4]);
     const u16 *src = (const u16 *)ram_ptr(c->r[5]);
+    hw_pre_write(r.x, r.y, r.w, r.h);
     for (int j = 0; j < r.h; j++)
         for (int i = 0; i < r.w; i++)
             g_vram[((r.y + j) & 511) * VRAM_W + ((r.x + i) & 1023)] = src[j * r.w + i];
+    hw_upload(r.x, r.y, r.w, r.h);
     c->r[2] = 0;
 }
 
@@ -109,8 +112,10 @@ void hle_MoveImage(Ctx *c) {
 void hle_ClearImage(Ctx *c) {
     PsxRect r = get_rect(c->r[4]);
     u16 col = (u16)(((c->r[5] & 255) >> 3) | (((c->r[6] & 255) >> 3) << 5) | (((c->r[7] & 255) >> 3) << 10));
+    hw_pre_write(r.x, r.y, r.w, r.h);
     for (int j = 0; j < r.h; j++)
         for (int i = 0; i < r.w; i++)
             g_vram[((r.y + j) & 511) * VRAM_W + ((r.x + i) & 1023)] = col;
+    hw_fill(r.x, r.y, r.w, r.h, col);
     c->r[2] = 0;
 }

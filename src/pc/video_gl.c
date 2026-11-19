@@ -9,113 +9,29 @@
  * The built-in shaders below are written for this project.
  *
  * GL functions are loaded through SDL_GL_GetProcAddress (no GL headers or loader library
- * needed); the context is OpenGL 3.2 core, which macOS and Windows both provide. */
+ * needed); the context is OpenGL 3.3 core, which macOS and Windows both provide. */
 #include "video_gl.h"
+#include "gl_funcs.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stddef.h>
 #ifdef _WIN32
 #include <windows.h>
-#define GLCC __stdcall
 #else
 #include <dirent.h>
 #include <sys/stat.h>
-#define GLCC
 #endif
 
 void rt_log(const char *fmt, ...);
 void ui_toast(const char *msg);
 
 /* ------------------------------------------------------------------ GL loader */
-typedef unsigned int GLuint, GLenum, GLbitfield;
-typedef int GLint, GLsizei;
-typedef float GLfloat;
-typedef char GLchar;
-typedef unsigned char GLboolean;
-typedef ptrdiff_t GLsizeiptr;
-
-#define GL_TEXTURE_2D 0x0DE1
-#define GL_TEXTURE_MAG_FILTER 0x2800
-#define GL_TEXTURE_MIN_FILTER 0x2801
-#define GL_TEXTURE_WRAP_S 0x2802
-#define GL_TEXTURE_WRAP_T 0x2803
-#define GL_NEAREST 0x2600
-#define GL_LINEAR 0x2601
-#define GL_CLAMP_TO_EDGE 0x812F
-#define GL_RGBA8 0x8058
-#define GL_RGB8 0x8051
-#define GL_RGB 0x1907
-#define GL_BGRA 0x80E1
-#define GL_UNSIGNED_BYTE 0x1401
-#define GL_UNSIGNED_INT_8_8_8_8_REV 0x8367
-#define GL_UNPACK_ALIGNMENT 0x0CF5
-#define GL_PACK_ALIGNMENT 0x0D05
-#define GL_TEXTURE0 0x84C0
-#define GL_VERTEX_SHADER 0x8B31
-#define GL_FRAGMENT_SHADER 0x8B30
-#define GL_COMPILE_STATUS 0x8B81
-#define GL_LINK_STATUS 0x8B82
-#define GL_ARRAY_BUFFER 0x8892
-#define GL_STATIC_DRAW 0x88E4
-#define GL_FLOAT 0x1406
-#define GL_TRIANGLE_STRIP 0x0005
-#define GL_COLOR_BUFFER_BIT 0x4000
-#define GL_FRAMEBUFFER 0x8D40
-#define GL_BLEND 0x0BE2
-#define GL_SCISSOR_TEST 0x0C11
-#define GL_DEPTH_TEST 0x0B71
-#define GL_CULL_FACE 0x0B44
-
-#define GL_FUNCS \
-    X(void, Viewport, (GLint, GLint, GLsizei, GLsizei)) \
-    X(void, ClearColor, (GLfloat, GLfloat, GLfloat, GLfloat)) \
-    X(void, Clear, (GLbitfield)) \
-    X(void, Disable, (GLenum)) \
-    X(void, GenTextures, (GLsizei, GLuint *)) \
-    X(void, BindTexture, (GLenum, GLuint)) \
-    X(void, TexParameteri, (GLenum, GLenum, GLint)) \
-    X(void, TexImage2D, (GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void *)) \
-    X(void, TexSubImage2D, (GLenum, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, const void *)) \
-    X(void, PixelStorei, (GLenum, GLint)) \
-    X(void, ReadPixels, (GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, void *)) \
-    X(void, ActiveTexture, (GLenum)) \
-    X(GLuint, CreateShader, (GLenum)) \
-    X(void, ShaderSource, (GLuint, GLsizei, const GLchar *const *, const GLint *)) \
-    X(void, CompileShader, (GLuint)) \
-    X(void, GetShaderiv, (GLuint, GLenum, GLint *)) \
-    X(void, GetShaderInfoLog, (GLuint, GLsizei, GLsizei *, GLchar *)) \
-    X(void, DeleteShader, (GLuint)) \
-    X(GLuint, CreateProgram, (void)) \
-    X(void, AttachShader, (GLuint, GLuint)) \
-    X(void, BindAttribLocation, (GLuint, GLuint, const GLchar *)) \
-    X(void, LinkProgram, (GLuint)) \
-    X(void, GetProgramiv, (GLuint, GLenum, GLint *)) \
-    X(void, GetProgramInfoLog, (GLuint, GLsizei, GLsizei *, GLchar *)) \
-    X(void, DeleteProgram, (GLuint)) \
-    X(void, UseProgram, (GLuint)) \
-    X(GLint, GetUniformLocation, (GLuint, const GLchar *)) \
-    X(void, Uniform1i, (GLint, GLint)) \
-    X(void, Uniform1f, (GLint, GLfloat)) \
-    X(void, Uniform2f, (GLint, GLfloat, GLfloat)) \
-    X(void, UniformMatrix4fv, (GLint, GLsizei, GLboolean, const GLfloat *)) \
-    X(void, GenVertexArrays, (GLsizei, GLuint *)) \
-    X(void, BindVertexArray, (GLuint)) \
-    X(void, GenBuffers, (GLsizei, GLuint *)) \
-    X(void, BindBuffer, (GLenum, GLuint)) \
-    X(void, BufferData, (GLenum, GLsizeiptr, const void *, GLenum)) \
-    X(void, EnableVertexAttribArray, (GLuint)) \
-    X(void, DisableVertexAttribArray, (GLuint)) \
-    X(void, VertexAttribPointer, (GLuint, GLint, GLenum, GLboolean, GLsizei, const void *)) \
-    X(void, VertexAttrib4f, (GLuint, GLfloat, GLfloat, GLfloat, GLfloat)) \
-    X(void, DrawArrays, (GLenum, GLint, GLsizei)) \
-    X(void, BindFramebuffer, (GLenum, GLuint))
-
-#define X(ret, name, args) typedef ret (GLCC *PFN_##name) args; static PFN_##name gl##name;
+#define X(ret, name, args) PFN_##name gl##name;
 GL_FUNCS
 #undef X
 
-static int load_gl(void) {
+int gl_load_functions(void) {
     int ok = 1;
 #define X(ret, name, args) \
     gl##name = (PFN_##name)SDL_GL_GetProcAddress("gl" #name); \
@@ -311,6 +227,8 @@ static SDL_GLContext s_ctx;
 static GLuint s_prog, s_vao, s_vbo, s_tex;
 static int s_tex_w, s_tex_h;          /* allocated texture size == image size */
 static int s_img_w, s_img_h;
+static GLuint s_ext;                  /* external source texture (hardware renderer output), 0 = own */
+static int s_ext_w, s_ext_h;
 static unsigned s_frame_count;
 static GLint u_mvp, u_tex, u_texsize, u_insize, u_outsize, u_fc, u_fd;
 
@@ -461,7 +379,7 @@ int vgl_init(SDL_Window *win) {
     s_ctx = SDL_GL_CreateContext(win);
     if (!s_ctx) { rt_log("[gl] context: %s", SDL_GetError()); return 0; }
     SDL_GL_MakeCurrent(win, s_ctx);
-    if (!load_gl()) return 0;
+    if (!gl_load_functions()) return 0;
 
     char *pref = SDL_GetPrefPath("PortGamePC", "Brigandine");
     if (pref) {
@@ -515,7 +433,10 @@ void vgl_upload(const uint32_t *argb, int w, int h) {
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, argb);
     }
     s_img_w = w; s_img_h = h;
+    s_ext = 0;
 }
+
+void vgl_use_texture(unsigned tex, int w, int h) { s_ext = tex; s_ext_w = w; s_ext_h = h; }
 
 void vgl_draw(int dx, int dy, int dw, int dh) {
     int ow, oh;
@@ -525,20 +446,27 @@ void vgl_draw(int dx, int dy, int dw, int dh) {
     glViewport(0, 0, ow, oh);
     glClearColor(0, 0, 0, 1);
     glClear(GL_COLOR_BUFFER_BIT);
-    if (!s_img_w || !s_prog || dw <= 0 || dh <= 0) return;
+    GLuint src = s_ext ? s_ext : s_tex;
+    int tw = s_ext ? s_ext_w : s_tex_w, th = s_ext ? s_ext_h : s_tex_h;
+    int iw = s_ext ? s_ext_w : s_img_w, ih = s_ext ? s_ext_h : s_img_h;
+    if (!iw || !s_prog || dw <= 0 || dh <= 0) return;
     glViewport(dx, oh - dy - dh, dw, dh);
     glUseProgram(s_prog);
     static const GLfloat mvp[16] = { 2, 0, 0, 0,  0, 2, 0, 0,  0, 0, -1, 0,  -1, -1, 0, 1 };
     glUniformMatrix4fv(u_mvp, 1, 0, mvp);
     glUniform1i(u_tex, 0);
-    glUniform2f(u_texsize, (GLfloat)s_tex_w, (GLfloat)s_tex_h);
-    glUniform2f(u_insize, (GLfloat)s_img_w, (GLfloat)s_img_h);
+    glUniform2f(u_texsize, (GLfloat)tw, (GLfloat)th);
+    glUniform2f(u_insize, (GLfloat)iw, (GLfloat)ih);
     glUniform2f(u_outsize, (GLfloat)dw, (GLfloat)dh);
     glUniform1i(u_fc, (GLint)s_frame_count++);
     glUniform1i(u_fd, 1);
     for (int i = 0; i < s_npar; i++) if (s_par[i].loc >= 0) glUniform1f(s_par[i].loc, s_par[i].value);
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, s_tex);
+    glBindTexture(GL_TEXTURE_2D, src);
+    if (s_ext) {
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, s_linear ? GL_LINEAR : GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, s_linear ? GL_LINEAR : GL_NEAREST);
+    }
     glBindVertexArray(s_vao);
     glBindBuffer(GL_ARRAY_BUFFER, s_vbo);
     glEnableVertexAttribArray(0);

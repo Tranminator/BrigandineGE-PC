@@ -5,6 +5,7 @@
 
 u16 g_vram[VRAM_W * VRAM_H];
 GpuState g_gpu;
+int g_gpu_skip_draw;
 
 static inline int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
@@ -175,6 +176,7 @@ int gp0_len(u32 cmd) {
 void gpu_gp0_packet(const u32 *w, int n) {
     u32 op = w[0] >> 24;
     if (op == 0x00 || op == 0x01) return;
+    if (g_gpu_skip_draw && (op == 0x02 || (op >= 0x20 && op < 0x80))) return;   /* frame skip */
     if (op == 0x02) {
         int x = (w[1] & 0x3F0), y = (w[1] >> 16) & 0x1FF;
         int ww = ((w[2] & 0x3FF) + 15) & ~15, hh = (w[2] >> 16) & 0x1FF;

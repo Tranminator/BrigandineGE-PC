@@ -25,7 +25,7 @@ high-resolution renderer, Windows build.
 
 ## Build (macOS)
 ```sh
-brew install cmake sdl2
+brew install cmake sdl2          # Dear ImGui is fetched automatically by CMake
 python3 -m venv .venv && .venv/bin/pip install splat64[mips] spimdisasm m2c   # analysis tools
 # 0) put your disc images in iso/  (e.g. "iso/Disc 1/<disc1>.bin" + .cue)
 # 1) extract the disc once (needed by the recompiler: EXE + OVER*.BIN)
@@ -54,16 +54,24 @@ cmake -S . -B build/cmake && cmake --build build/cmake -j8
 
 `F1` shows all of VRAM (debug). Hold `Tab` to fast-forward.
 
-Sound settings: press `F2` in game. Up/Down selects BGM / SFX / MOVIE, Left/Right changes by 5%,
-`F2` or `Esc` closes and saves (game input is paused while the panel is open). Defaults: BGM 30%
-(matches the emulator balance between music and menu sounds), SFX 100%, MOVIE 50%.
+Settings: press `F2` (mouse, keyboard or controller; `F2`/`Esc` closes and saves). Game input is
+paused while the window is open.
+- **Graphics** — VSync (on: no tearing; off: best for variable-refresh displays), Frame skip
+  (Off / Auto / draw 1 of 2–4: keeps normal game speed on slow machines), performance overlay.
+- **Sound** — Music 30%, Sound effects 100%, Movies 50% by default (music level matches the
+  emulator balance between music and menu sounds).
+- **Controls** — key / controller reference.
+
+The game logic always runs at the PS1's 59.94 Hz (it counts frames), whatever the display refresh.
 Saved to `~/Library/Application Support/PortGamePC/Brigandine/settings.cfg` (Windows: `%APPDATA%`).
-Environment variables `BRIG_BGM_VOLUME`, `BRIG_SFX_VOLUME`, `BRIG_MOVIE_VOLUME` (percent) override the file.
+Environment variables `BRIG_BGM_VOLUME`, `BRIG_SFX_VOLUME`, `BRIG_MOVIE_VOLUME` (percent),
+`BRIG_VSYNC` (0/1) and `BRIG_FRAMESKIP` (0–4) override the file.
 
 Debug env vars: `BRIG_TRACE=1` (per-second GPU stats), `BRIG_SHOT_DIR=<dir> BRIG_SHOT_EVERY=<n>`
 (BMP snapshots), `BRIG_INPUT="frame:hexmask,..."` (scripted pad input), `BRIG_SHOW_VRAM=1`,
 `BRIG_CDTRACE=1` (CD commands), `BRIG_SNDTRACE=1` (libsnd calls + active SPU voices), `BRIG_WAV=<file.wav>`
-(record audio output), `BRIG_MUTE_XA=1` (SPU only), `BRIG_REVERB_ONLY=1` (reverb wet signal only), `BRIG_MUTE_SPU=1` (XA only), `BRIG_KEYS="frame:KeyName,..."` (scripted keyboard keys).
+(record audio output), `BRIG_MUTE_XA=1` (SPU only), `BRIG_REVERB_ONLY=1` (reverb wet signal only), `BRIG_MUTE_SPU=1` (XA only), `BRIG_KEYS="frame:KeyName,..."` (scripted keyboard keys), `BRIG_FAST=1` (unthrottled), `BRIG_SKIP_MOVIES=1`,
+`BRIG_SHOT_FROM`/`BRIG_SHOT_TO` (snapshot range), `BRIG_SLOW_MS=<n>` (simulate a slow machine), `BRIG_UI_TAB=<0-2>`.
 
 ## Layout
 - `tools/recomp.py` — MIPS → C recompiler (function discovery, jump tables, patch trampolines, overlays)

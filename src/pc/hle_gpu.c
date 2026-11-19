@@ -2,6 +2,8 @@
  * SetDefDrawEnv, LoadTPage...) stay recompiled; LoadTPage/LoadClut reach LoadImage here. */
 #include "gpu.h"
 #include "hle.h"
+#include <SDL.h>
+#include <stdlib.h>
 
 typedef struct { s16 x, y, w, h; } PsxRect;
 
@@ -22,6 +24,11 @@ void hle_DrawOTag(Ctx *c) {
     u32 p = c->r[4] & 0xFFFFFF;
     int guard = 0;
     g_stat_otag++;
+    {   /* debug: BRIG_SLOW_MS=<n> simulates a slow machine by spending n ms per drawn frame */
+        static int slow = -1;
+        if (slow < 0) { const char *e = getenv("BRIG_SLOW_MS"); slow = e ? atoi(e) : 0; }
+        if (slow && !g_gpu_skip_draw) SDL_Delay((Uint32)slow);
+    }
     while (p != 0xFFFFFF && guard++ < 0x100000) {
         u32 hdr = rd32(0x80000000u | p);
         int n = hdr >> 24;

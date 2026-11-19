@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 void rt_log(const char *fmt, ...);
 
@@ -605,6 +606,49 @@ void hw_copy(int sx, int sy, int dx, int dy, int w, int h) {
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, s_fbo);
     glBlitFramebuffer(0, 0, tw, th, dx * S, dy * S, (dx + w) * S, (dy + h) * S, GL_COLOR_BUFFER_BIT, GL_NEAREST);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+/* ------------------------------------------------------------------ debug */
+/* Write the scaled VRAM (sampled at each native pixel's centre), the software VRAM and a
+ * difference image as BMPs, to find where the two renderers disagree. */
+int hw_debug_dump(const char *dir) {
+    if (!ready()) return 0;
+    flush();
+    int S = s_scale, W = VRAM_W * S;
+    u8 *hi = (u8 *)malloc((size_t)W * 4 * S);      /* S rows at a time */
+    SDL_Surface *a = SDL_CreateRGBSurfaceWithFormat(0, VRAM_W, VRAM_H, 32, SDL_PIXELFORMAT_ARGB8888);
+    SDL_Surface *b = SDL_CreateRGBSurfaceWithFormat(0, VRAM_W, VRAM_H, 32, SDL_PIXELFORMAT_ARGB8888);
+    SDL_Surface *d = SDL_CreateRGBSurfaceWithFormat(0, VRAM_W, VRAM_H, 32, SDL_PIXELFORMAT_ARGB8888);
+    if (!hi || !a || !b || !d) { free(hi); return 0; }
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, s_fbo);
+    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    int ndiff = 0;
+    for (int y = 0; y < VRAM_H; y++) {
+        glReadPixels(0, y * S, W, S, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, hi);
+        u32 *ra = (u32 *)((u8 *)a->pixels + y * a->pitch), *rb = (u32 *)((u8 *)b->pixels + y * b->pitch);
+        u32 *rd = (u32 *)((u8 *)d->pixels + y * d->pitch);
+        for (int x = 0; x < VRAM_W; x++) {
+            u32 h = ((u32 *)hi)[(S / 2) * W + x * S + S / 2];
+            u16 v = g_vram[y * VRAM_W + x];
+            u32 n = 0xFF000000u | ((u32)((v & 31) << 3) << 16) | ((u32)(((v >> 5) & 31) << 3) << 8) | (u32)(((v >> 10) & 31) << 3);
+            ra[x] = h | 0xFF000000u; rb[x] = n;
+            int dr = abs((int)((h >> 16) & 255) - (int)((n >> 16) & 255)), dg = abs((int)((h >> 8) & 255) - (int)((n >> 8) & 255)),
+                db = abs((int)(h & 255) - (int)(n & 255));
+            int m = dr > dg ? dr : dg; m = m > db ? m : db;
+            rd[x] = m > 40 ? 0xFFFF0000u : (0xFF000000u | (u32)(m * 3) << 8);
+            ndiff += m > 40;
+        }
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    char p[1100];
+    snprintf(p, sizeof p, "%svram_hw.bmp", dir); SDL_SaveBMP(a, p);
+    snprintf(p, sizeof p, "%svram_sw.bmp", dir); SDL_SaveBMP(b, p);
+    snprintf(p, sizeof p, "%svram_diff.bmp", dir); SDL_SaveBMP(d, p);
+    rt_log("[hw] debug dump to %s: %d native pixels differ strongly; display %d,%d %dx%d; area %d,%d-%d,%d",
+           dir, ndiff, g_gpu.disp_x, g_gpu.disp_y, g_gpu.disp_w, g_gpu.disp_h,
+           g_gpu.area_x0, g_gpu.area_y0, g_gpu.area_x1, g_gpu.area_y1);
+    SDL_FreeSurface(a); SDL_FreeSurface(b); SDL_FreeSurface(d); free(hi);
+    return 1;
 }
 
 /* ------------------------------------------------------------------ display */

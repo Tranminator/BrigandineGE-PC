@@ -10,6 +10,11 @@
 #include <SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
+#ifdef _WIN32
+#include <direct.h>
+#else
+#include <sys/stat.h>
+#endif
 
 static SDL_Window *g_win;
 static SDL_GameController *g_pad;
@@ -217,6 +222,20 @@ void platform_vblank(void) {
         if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_F1) g_show_vram ^= 1;
         if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.sym == SDLK_F5) state_request_save(state_slot());
         if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.sym == SDLK_F9) state_request_load(state_slot());
+        if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.sym == SDLK_F10 && g_hw_on) {
+            /* diagnostics: VRAM images into <pref>/debug/ + states/debug.state */
+            char *pref = SDL_GetPrefPath("PortGamePC", "Brigandine"), dir[1100];
+            const char *env = getenv("BRIG_DEBUG_DIR");                 /* tests */
+            if (env) snprintf(dir, sizeof dir, "%s/", env);
+            else snprintf(dir, sizeof dir, "%sdebug/", pref ? pref : "");
+            if (pref) SDL_free(pref);
+#ifdef _WIN32
+            _mkdir(dir);
+#else
+            mkdir(dir, 0755);
+#endif
+            if (hw_debug_dump(dir)) { state_request_save(STATE_DEBUG_SLOT); ui_toast("Renderer debug dump written"); }
+        }
         if (e.type == SDL_KEYDOWN && (e.key.keysym.mod & KMOD_LSHIFT) &&
             (e.key.keysym.sym == SDLK_LEFT || e.key.keysym.sym == SDLK_RIGHT))
             state_cycle_slot(e.key.keysym.sym == SDLK_LEFT ? -1 : 1);   /* Left Shift + arrows: save slot */

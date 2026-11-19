@@ -31,6 +31,8 @@ void hw_upload(int x, int y, int w, int h);            /* CPU -> VRAM image */
 void hw_fill(int x, int y, int w, int h, u16 color);   /* GP0 02 / ClearImage */
 void hw_copy(int sx, int sy, int dx, int dy, int w, int h);   /* VRAM -> VRAM */
 
+int  hw_debug_dump(const char *dir);     /* F10: scaled vs software VRAM images */
+
 /* presentation: finish drawing and return the display area as an upscaled texture */
 int  hw_display_texture(unsigned *tex, int *w, int *h, int show_vram);
 

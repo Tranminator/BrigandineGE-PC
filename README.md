@@ -75,7 +75,8 @@ Debug env vars: `BRIG_TRACE=1` (per-second GPU stats), `BRIG_SHOT_DIR=<dir> BRIG
 (BMP snapshots), `BRIG_INPUT="frame:hexmask,..."` (scripted pad input), `BRIG_SHOW_VRAM=1`,
 `BRIG_CDTRACE=1` (CD commands), `BRIG_SNDTRACE=1` (libsnd calls + active SPU voices), `BRIG_WAV=<file.wav>`
 (record audio output), `BRIG_MUTE_XA=1` (SPU only), `BRIG_REVERB_ONLY=1` (reverb wet signal only), `BRIG_MUTE_SPU=1` (XA only), `BRIG_KEYS="frame:KeyName,..."` (scripted keyboard keys), `BRIG_FAST=1` (unthrottled), `BRIG_SKIP_MOVIES=1`,
-`BRIG_SHOT_FROM`/`BRIG_SHOT_TO` (snapshot range), `BRIG_SLOW_MS=<n>` (simulate a slow machine), `BRIG_UI_TAB=<0-4>`, `BRIG_STATE_DIR=<dir>` (save-slot folder, for tests), `BRIG_SHADER=<name>`, `BRIG_SHADER_CFG=<file>`, `BRIG_SCALE=<1-8>` (internal resolution).
+`BRIG_SHOT_FROM`/`BRIG_SHOT_TO` (snapshot range), `BRIG_SLOW_MS=<n>` (simulate a slow machine), `BRIG_UI_TAB=<0-4>`, `BRIG_STATE_DIR=<dir>` (save-slot folder, for tests), `BRIG_SHADER=<name>`, `BRIG_SHADER_CFG=<file>`, `BRIG_SCALE=<1-8>` (internal resolution). `F10` (hardware renderer only) writes renderer diagnostics to
+`<pref>/debug/` (scaled vs software VRAM images) and `states/debug.state` (`BRIG_DEBUG_DIR` overrides the folder).
 
 ## Renderer (internal resolution)
 `F2` → **Graphics** → **Internal resolution**:

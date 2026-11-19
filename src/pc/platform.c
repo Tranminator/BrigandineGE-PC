@@ -118,6 +118,10 @@ static void present(int skipped) {
     const char *dir = getenv("BRIG_SHOT_DIR"), *ev = getenv("BRIG_SHOT_EVERY");
     const char *sf_ = getenv("BRIG_SHOT_FROM"), *st_ = getenv("BRIG_SHOT_TO");
     ++frame_no;
+    {   /* debug: BRIG_GPUDUMP=<n> logs the GP0 packets that build the image shown at snapshot frame n */
+        static int dump = -2; if (dump == -2) { const char *e2 = getenv("BRIG_GPUDUMP"); dump = e2 ? atoi(e2) : -1; }
+        g_gpu_dump = (frame_no + 1 == dump);
+    }
     int in_range = (!sf_ || frame_no >= atoi(sf_)) && (!st_ || frame_no <= atoi(st_));
     if (dir && ev && atoi(ev) > 0 && in_range && (frame_no % atoi(ev)) == 0) {
         SDL_Surface *sf = SDL_CreateRGBSurfaceWithFormat(0, ow, oh, 32, SDL_PIXELFORMAT_ARGB8888);

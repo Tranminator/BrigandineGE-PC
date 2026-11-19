@@ -47,8 +47,6 @@ void hle_vblank_tick(Ctx *c) {
     platform_vblank();
     if (platform_quit_requested()) exit(0);
     g_vblank_count++;
-    {   static int dump = -2; if (dump == -2) { const char *e = getenv("BRIG_GPUDUMP"); dump = e ? atoi(e) : -1; }
-        g_gpu_dump = (int)g_vblank_count == dump; }
     cd_vblank();
     update_pads();
     if (g_vsync_cb && !g_in_vblank_cb) {

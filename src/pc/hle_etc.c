@@ -137,17 +137,7 @@ void hle_SsSetSerialVol(Ctx *c) {
     c->r[2] = 0;
 }
 
-/* ---------------------------------------------------------------- libmcrd (no card yet) */
-static u32 g_mc_last_cmd;
-#define MC_ASYNC(name, cmd) void hle_##name(Ctx *c) { g_mc_last_cmd = (cmd); c->r[2] = 1; }
-STUB(MemCardInit, 0) STUB(MemCardStart, 0) STUB(MemCardStop, 0)
-MC_ASYNC(MemCardExist, 1) MC_ASYNC(MemCardAccept, 2) MC_ASYNC(MemCardReadFile, 4) MC_ASYNC(MemCardWriteFile, 5)
-STUB(MemCardCreateFile, 1) STUB(MemCardFormat, 1) STUB(MemCardGetDirentry, 1)
-void hle_MemCardSync(Ctx *c) {
-    if (c->r[5]) wr32(c->r[5], g_mc_last_cmd);
-    if (c->r[6]) wr32(c->r[6], 1); /* McErrCardNotExist */
-    c->r[2] = 1;
-}
+/* libmcrd (memory cards): see memcard.c */
 
 /* ---------------------------------------------------------------- libpress / streaming
  * Only reachable from the game's movie player, which is replaced as a whole (movie.c). */

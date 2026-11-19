@@ -19,8 +19,9 @@ from the game is stored in this repository.
 
 ## Status
 Boots and plays natively: title, menus, story/scenario, strategy map, unit organisation, dialogue,
-FMV movies (with voice), XA + sequenced music, sound effects, reverb, sound options (F2).
-Not done yet: memory card saves (do not pick CONTINUE), battles not fully tested, Disc 2 swap,
+FMV movies (with voice), XA + sequenced music, sound effects, reverb, settings window (F2), save / load.
+Memory card saves (standard 128 KB card images, compatible with emulators).
+Not done yet: battles not fully tested, Disc 2 swap,
 high-resolution renderer, Windows build.
 
 ## Build (macOS)
@@ -73,6 +74,16 @@ Debug env vars: `BRIG_TRACE=1` (per-second GPU stats), `BRIG_SHOT_DIR=<dir> BRIG
 `BRIG_CDTRACE=1` (CD commands), `BRIG_SNDTRACE=1` (libsnd calls + active SPU voices), `BRIG_WAV=<file.wav>`
 (record audio output), `BRIG_MUTE_XA=1` (SPU only), `BRIG_REVERB_ONLY=1` (reverb wet signal only), `BRIG_MUTE_SPU=1` (XA only), `BRIG_KEYS="frame:KeyName,..."` (scripted keyboard keys), `BRIG_FAST=1` (unthrottled), `BRIG_SKIP_MOVIES=1`,
 `BRIG_SHOT_FROM`/`BRIG_SHOT_TO` (snapshot range), `BRIG_SLOW_MS=<n>` (simulate a slow machine), `BRIG_UI_TAB=<0-2>`.
+
+## Memory cards (save / load)
+The game saves to virtual memory cards stored as **standard 128 KB raw PS1 card images** — the same
+format as ePSXe `.mcr`, DuckStation `.mcd` and RetroArch/Beetle PSX `.srm` — so saves can be moved
+between this port and emulators.
+- Slot 1: `~/Library/Application Support/PortGamePC/Brigandine/memcard1.mcd` (Windows: `%APPDATA%\PortGamePC\Brigandine\`),
+  created (formatted, empty) the first time the game accesses the card.
+- Slot 2: `memcard2.mcd` in the same folder, used only if you put a card file there.
+- To continue an emulator save: copy that 128 KB card file over `memcard1.mcd` (back yours up first).
+- Every write goes to disk immediately.
 
 ## Layout
 - `tools/recomp.py` — MIPS → C recompiler (function discovery, jump tables, patch trampolines, overlays)

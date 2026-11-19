@@ -74,3 +74,7 @@ Debug env vars: `BRIG_TRACE=1` (per-second GPU stats), `BRIG_SHOT_DIR=<dir> BRIG
 - `decomp/` — splat configs, symbols, struct headers, first hand-decompiled C
 - `docs/` — plan, disc layout, findings
 - `tools/seq_render.c` — offline renderer for the game's music (A/B against recordings)
+
+## License
+The code in this repository is released under the [MIT License](LICENSE).
+It covers only this project's own code and tools — not the game, which you must own.

@@ -8,12 +8,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-Settings g_settings = { 30, 100, 50 };   /* BGM 30% matches the emulator balance (user-tested); movies 50% (user choice) */
+Settings g_settings = { 30, 100, 50, 1, 0, 0 };   /* BGM 30% matches the emulator balance (user-tested); movies 50% (user choice) */
 extern float g_bgm_gain, g_sfx_gain, g_movie_gain;   /* audio.c */
 
 static char g_path[1024];
 
 static int clamp_pct(int v) { return v < 0 ? 0 : v > 100 ? 100 : v; }
+static int clamp_range(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
 void settings_apply(void) {
     g_bgm_gain = g_settings.bgm / 100.0f;
@@ -32,6 +33,9 @@ void settings_load(void) {
             if (sscanf(line, "bgm=%d", &v) == 1) g_settings.bgm = clamp_pct(v);
             else if (sscanf(line, "sfx=%d", &v) == 1) g_settings.sfx = clamp_pct(v);
             else if (sscanf(line, "movie=%d", &v) == 1) g_settings.movie = clamp_pct(v);
+            else if (sscanf(line, "vsync=%d", &v) == 1) g_settings.vsync = v != 0;
+            else if (sscanf(line, "frameskip=%d", &v) == 1) g_settings.frameskip = clamp_range(v, 0, 4);
+            else if (sscanf(line, "show_perf=%d", &v) == 1) g_settings.show_perf = v != 0;
         }
         fclose(f);
     }
@@ -39,6 +43,8 @@ void settings_load(void) {
     if ((e = getenv("BRIG_BGM_VOLUME"))) g_settings.bgm = atoi(e);
     if ((e = getenv("BRIG_SFX_VOLUME"))) g_settings.sfx = atoi(e);
     if ((e = getenv("BRIG_MOVIE_VOLUME"))) g_settings.movie = atoi(e);
+    if ((e = getenv("BRIG_VSYNC"))) g_settings.vsync = atoi(e) != 0;
+    if ((e = getenv("BRIG_FRAMESKIP"))) g_settings.frameskip = clamp_range(atoi(e), 0, 4);
     settings_apply();
 }
 
@@ -46,8 +52,9 @@ void settings_save(void) {
     if (!g_path[0]) return;
     FILE *f = fopen(g_path, "w");
     if (!f) return;
-    fprintf(f, "# Brigandine GE native port settings (0-100)\nbgm=%d\nsfx=%d\nmovie=%d\n",
-            g_settings.bgm, g_settings.sfx, g_settings.movie);
+    fprintf(f, "# Brigandine GE native port settings\n# volumes 0-100\nbgm=%d\nsfx=%d\nmovie=%d\n"
+               "# video: vsync 0/1, frameskip 0 off / 1 auto / 2-4 draw 1 of N, show_perf 0/1\nvsync=%d\nframeskip=%d\nshow_perf=%d\n",
+            g_settings.bgm, g_settings.sfx, g_settings.movie, g_settings.vsync, g_settings.frameskip, g_settings.show_perf);
     fclose(f);
 }
 

@@ -16,6 +16,7 @@ typedef struct {
 
 extern u16 g_vram[VRAM_W * VRAM_H];
 extern GpuState g_gpu;
+extern int g_gpu_skip_draw;   /* frame skip: drop draw primitives, keep state + VRAM transfers */
 
 void gpu_reset(void);
 int  gp0_len(u32 cmd);

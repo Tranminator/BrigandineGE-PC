@@ -35,8 +35,8 @@ int main(int argc, char **argv) {
     }
     if (!disc_open(argv[1])) { fprintf(stderr, "cannot open %s\n", argv[1]); return 1; }
     if (!load_exe()) return 1;
+    settings_load();   /* before the window: VSync / frame skip apply at startup */
     if (!platform_init("Brigandine: Grand Edition")) { fprintf(stderr, "SDL init failed\n"); return 1; }
-    settings_load();
     if (!audio_init()) fprintf(stderr, "audio init failed (continuing silent)\n");
     gpu_reset();
     g_ctx.r[29] = 0x801FFF00u;

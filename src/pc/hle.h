@@ -8,6 +8,7 @@ void platform_vblank(void);       /* present + events + 60 Hz pacing */
 u16  platform_pad_buttons(void);  /* PS1 layout, active-high */
 int  platform_quit_requested(void);
 void platform_set_movie_frame(const u8 *rgb, int w, int h); /* NULL = back to VRAM */
+void platform_apply_video(void);  /* VSync setting changed */
 
 /* disc.c */
 int  disc_open(const char *bin_path);

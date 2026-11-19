@@ -58,7 +58,8 @@ cmake -S . -B build/cmake && cmake --build build/cmake -j8
 Settings: press `F2` (mouse, keyboard or controller; `F2`/`Esc` closes and saves). Game input is
 paused while the window is open.
 - **Graphics** — VSync (on: no tearing; off: best for variable-refresh displays), Frame skip
-  (Off / Auto / draw 1 of 2–4: keeps normal game speed on slow machines), performance overlay.
+  (Off / Auto / draw 1 of 2–4: keeps normal game speed on slow machines), display shader (below),
+  performance overlay.
 - **Sound** — Music 30%, Sound effects 100%, Movies 50% by default (music level matches the
   emulator balance between music and menu sounds).
 - **Controls** — key / controller reference.
@@ -74,7 +75,20 @@ Debug env vars: `BRIG_TRACE=1` (per-second GPU stats), `BRIG_SHOT_DIR=<dir> BRIG
 (BMP snapshots), `BRIG_INPUT="frame:hexmask,..."` (scripted pad input), `BRIG_SHOW_VRAM=1`,
 `BRIG_CDTRACE=1` (CD commands), `BRIG_SNDTRACE=1` (libsnd calls + active SPU voices), `BRIG_WAV=<file.wav>`
 (record audio output), `BRIG_MUTE_XA=1` (SPU only), `BRIG_REVERB_ONLY=1` (reverb wet signal only), `BRIG_MUTE_SPU=1` (XA only), `BRIG_KEYS="frame:KeyName,..."` (scripted keyboard keys), `BRIG_FAST=1` (unthrottled), `BRIG_SKIP_MOVIES=1`,
-`BRIG_SHOT_FROM`/`BRIG_SHOT_TO` (snapshot range), `BRIG_SLOW_MS=<n>` (simulate a slow machine), `BRIG_UI_TAB=<0-4>`, `BRIG_STATE_DIR=<dir>` (save-slot folder, for tests).
+`BRIG_SHOT_FROM`/`BRIG_SHOT_TO` (snapshot range), `BRIG_SLOW_MS=<n>` (simulate a slow machine), `BRIG_UI_TAB=<0-4>`, `BRIG_STATE_DIR=<dir>` (save-slot folder, for tests), `BRIG_SHADER=<name>`, `BRIG_SHADER_CFG=<file>`.
+
+## Display shaders
+The image is drawn with OpenGL 3.2 through a shader, chosen in `F2` → **Graphics**:
+- **Sharp** (default) — crisp pixels with even widths at any window size.
+- **Pixel** — raw nearest-neighbour. **Smooth** — bilinear.
+- **Scanlines** — TV-style line gaps. **CRT** — curved screen, scanlines, shadow mask, glow.
+
+Each shader's `#pragma parameter` values appear as sliders and are saved in `shaders.cfg`.
+**Your own shaders:** shaders use RetroArch's single-pass `.glsl` format (one file with `VERTEX` /
+`FRAGMENT` sections), so most single-pass shaders from the RetroArch / libretro GLSL collection work
+as they are. Put them in `~/Library/Application Support/PortGamePC/Brigandine/shaders/` (the
+**Open shaders folder** button) or in `shaders/` next to the executable, then press **Reload**.
+Multi-pass presets (`.glslp`) are not supported yet.
 
 ## Quick save / load (save anywhere)
 The port's own save system works at any moment — on the map, in menus, in the middle of a battle —

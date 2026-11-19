@@ -16,7 +16,7 @@ FetchContent_Declare(imgui GIT_REPOSITORY https://github.com/ocornut/imgui.git G
 FetchContent_MakeAvailable(imgui)
 set(IMGUI_SRC ${imgui_SOURCE_DIR}/imgui.cpp ${imgui_SOURCE_DIR}/imgui_draw.cpp ${imgui_SOURCE_DIR}/imgui_tables.cpp
     ${imgui_SOURCE_DIR}/imgui_widgets.cpp ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl2.cpp
-    ${imgui_SOURCE_DIR}/backends/imgui_impl_sdlrenderer2.cpp)
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp)
 
 set(GEN_DIR ${CMAKE_SOURCE_DIR}/build/gen)
 
@@ -40,6 +40,6 @@ if(NOT MSVC)
   target_compile_options(brigandine PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wno-unused-function>)
 endif()
 
-# Runtime assets (bundled OFL font for the BIOS-font replacement) next to the executable
+# Runtime assets (bundled OFL font for the BIOS-font replacement, example shaders) next to the executable
 add_custom_command(TARGET brigandine POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:brigandine>/assets)

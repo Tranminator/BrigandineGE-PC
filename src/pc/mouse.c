@@ -16,6 +16,10 @@
  *     Attack / spell targets ("Target Who?") use the same hex cursor.
  *   - command menu / system menu (the game's generic list menu): moving the mouse up / down
  *     changes the item, a click chooses it, right click closes the menu.
+ * Icon menus, anywhere (battle commands, castle menu, Organize menu...): item boxes come from the
+ * game's own item position table.
+ * Strategy map: the quill follows the pointer (see smap_*), a click is Circle; pushing past the
+ * camera box scrolls. Organize grids (squads / monster stock): the pointer picks the cell.
  * Scrolling lists, anywhere (main EXE func 80021EB8: attacks, magic, skills, items...): a hook on the
  * recompiled function gives the item count; the pointer walks the items, pushing past the first /
  * last visible row (or the wheel) scrolls, a click chooses.
@@ -49,11 +53,11 @@
 #define RAM_MENU_INDEX  0x800A6950u   /* selected item */
 #define RAM_MENU_LAST   0x800A69E0u   /* index of the last item, -1 = no menu */
 #define RAM_MENU_TYPE   0x800A69A4u   /* 0 = battle system menu, 1 = battle command menu */
-/* both battle menus: items stacked at the top right */
-#define MENU_X0 224.0
-#define MENU_X1 306.0
-#define MENU_Y0 19.5                  /* top of item 0 */
-#define MENU_DY 19.2                  /* item pitch */
+#define RAM_MENU_STATE  0x800A696Cu   /* 2 = taking input */
+#define MENU_POS        0x800ADCE0u   /* per item: x, y (s32, 8.8 fixed); the icon is at x - 8 */
+#define MENU_W          80.0          /* item box: x - 8 .. x + 72, y - 3 .. y + 16 */
+#define MENU_H          19.0
+#define MENU_TYPE_MAP   100           /* strategy map, no menu open */
 #define PANEL_Y 198.0                 /* the unit / terrain panel starts here (not map) */
 /* generic scrolling list (main EXE func 80021EB8: magic, skills, attacks, items...), $gp-relative */
 #define RAM_LIST_TOP    0x800A6820u   /* first visible item */
@@ -112,6 +116,34 @@ static int s_list_valid, s_list_wr = -1;
 void hook_f_main_80021EB8(Ctx *c) {
     s_list_count = (s32)c->r[4];
     s_list_seen = s_frame;
+}
+/* Organize squad grid (strategy overlay func 800CDB1C, CLASS / EQUIP / ...): the game keeps a pixel
+ * cursor (x = 42 * column, column 0 = leader; y = row pitch * row) and derives the unit from it.
+ * Rows: knights (pitch 44, 3 visible), or the monster stock (pitch 40). The quill is drawn at
+ * (x + 33, y - scroll + 104 / 108). */
+#define GRID_MODE    0x800DC660u   /* 0 = squads, 312 = stock, between = sliding */
+#define GRID_X       0x800DC664u
+#define GRID_SCROLL  0x800DC668u   /* squads */
+#define GRID_Y       0x800DC66Cu
+#define GRID_SCROLL2 0x800DC670u   /* stock */
+#define GRID_SCROLLV 0x800DC688u   /* squads: scroll animation speed, 0 = still */
+#define RAM_KNIGHTS  0x800A690Cu   /* knights in the castle = squad rows */
+static unsigned s_grid_seen;
+static double s_grid_sx, s_grid_sy;        /* grid pointer, display pixels */
+static int s_grid_valid;
+static u32 s_grid_wx = 0xFFFFFFFF, s_grid_wy = 0xFFFFFFFF;
+void hook_f_ov1_800CDB1C(Ctx *c) { (void)c; s_grid_seen = s_frame; }
+static int grid_active(void) {
+    u32 m = rd32(GRID_MODE);
+    return s_frame - s_grid_seen <= 2 && (m == 0 || m == 312) && rd32(OVL_ID_ADDR) == 5;
+}
+typedef struct { double pitch, top; u32 scroll_addr; int rows; } GridLayout;
+static GridLayout grid_layout(void) {
+    GridLayout g;
+    if (rd32(GRID_MODE) == 0) { g.pitch = 44; g.top = 104; g.scroll_addr = GRID_SCROLL; g.rows = (s32)rd32(RAM_KNIGHTS); }
+    else { g.pitch = 40; g.top = 108; g.scroll_addr = GRID_SCROLL2; g.rows = 760 / 40 + 1; }
+    if (g.rows < 1) g.rows = 1;
+    return g;
 }
 static int list_active(void) {
     return s_frame - s_list_seen <= 2 && s_list_count > 0 && (s32)rd32(RAM_LIST_STATE) == 2;
@@ -199,11 +231,51 @@ static void world_to_screen(double wx, double wz, double *sx, double *sy) {
     *sy = (H[1][0] * x + H[1][1] * z + H[1][2]) / w;
 }
 static void hex_center(int col, int row, double *wx, double *wz) { *wx = col; *wz = row - ((col % 2 == 0) ? 0.5 : 0.0); }
-static int menu_item_at(double x, double y) {   /* battle list menu item under the pointer, -1 none */
-    if (x < MENU_X0 || x > MENU_X1 || y < MENU_Y0) return -1;
-    int k = (int)floor((y - MENU_Y0) / MENU_DY);
+/* icon menu item k: top-left of its box (the game slides the items in from the right) */
+static void menu_item_box(int k, double *x, double *y) {
+    *x = ((s32)rd32(MENU_POS + 8 * k) >> 8) - 8; *y = ((s32)rd32(MENU_POS + 8 * k + 4) >> 8) - 3;
+}
+static int menu_item_at(double px, double py) {   /* icon menu item under the pointer, -1 none */
     int last = (s32)rd32(RAM_MENU_LAST);
-    return k >= 0 && k <= last ? k : -1;
+    for (int k = 0; k <= last && k < 16; k++) {
+        double x, y; menu_item_box(k, &x, &y);
+        if (px >= x && px < x + MENU_W && py >= y && py < y + MENU_H) return k;
+    }
+    return -1;
+}
+/* captured pointer: the item whose row holds display y (clamped to the first / last row) */
+static int menu_item_row(double py) {
+    int last = (s32)rd32(RAM_MENU_LAST), best = 0;
+    for (int k = 0; k <= last && k < 16; k++) {
+        double x, y; menu_item_box(k, &x, &y);
+        if (py >= y) best = k;
+    }
+    return best;
+}
+
+/* Strategy map (overlay 5): the map is bent to fake the horizon, so it is not a plane. With
+ * u = x - camX / 32, v = z - camZ / 32 (world in 8192 units, camera from RAM), the game draws its
+ * cursor (the quill's tip) at screen x = 160 + u * s(v), y = f(v); fitted to the quill sprite
+ * (< 1 px). The camera keeps the cursor inside u in [-3.22, 3.22], v in [-2.59, 2.19]. */
+#define SMAP_U  3.22
+#define SMAP_V0 -2.59
+#define SMAP_V1 2.19
+static double smap_s(double v) { return (0.26788293 * v + 3.09757407) * v + 32.06222178; }
+static double smap_y(double v) { return ((0.33245762 * v + 2.67249574) * v + 26.38856192) * v + 119.82098294; }
+static void smap_cam(double *cu, double *cv) { *cu = (s32)rd32(RAM_CAM_X) / 32.0; *cv = (s32)rd32(RAM_CAM_Z) / 32.0; }
+static void smap_to_screen(double wx, double wz, double *sx, double *sy) {
+    double cu, cv; smap_cam(&cu, &cv);
+    double u = wx - cu, v = wz - cv;
+    *sx = 160 + u * smap_s(v); *sy = smap_y(v);
+}
+static void smap_to_world(double sx, double sy, double *wx, double *wz) {
+    double v = 0;                                     /* f is strictly increasing: Newton */
+    for (int i = 0; i < 20; i++) {
+        double d = (0.99737286 * v + 5.34499148) * v + 26.38856192;
+        v -= (smap_y(v) - sy) / d;
+    }
+    double cu, cv; smap_cam(&cu, &cv);
+    *wx = (sx - 160) / smap_s(v) + cu; *wz = v + cv;
 }
 
 /* ------------------------------------------------------------------ input events */
@@ -276,12 +348,16 @@ void mouse_update(void) {
     if (s_pulse_frames > 0) { if (--s_pulse_frames == 0) s_pulse_bits = 0; s_moved = 0; return; }
     if (s_gap_frames > 0) { s_gap_frames--; s_moved = 0; return; }
 
-    int battle = rd32(OVL_ID_ADDR) == 6 && rd32(RAM_SCREEN) == 2;
-    int mode = battle ? (int)rd32(RAM_INPUT_MODE) : -1;
-    int menu = battle && mode == 1 && rd32(RAM_MENU_TYPE) <= 1 && (s32)rd32(RAM_MENU_LAST) >= 0;
-    int ctx = list_active() ? 4 : !battle ? 0 : menu ? 2 : (mode == 0 || mode == 2) && rd8(RAM_CUR_COL) != 0xFF ? 1 : 3;   /* 0xFF: cursor hidden */
+    u32 ovl = rd32(OVL_ID_ADDR);
+    int battle = ovl == 6 && rd32(RAM_SCREEN) == 2;
+    int mode = (int)rd32(RAM_INPUT_MODE);
+    int menu = (s32)rd32(RAM_MENU_LAST) >= 0 && rd32(RAM_MENU_STATE) == 2;   /* icon menu taking input */
+    int smap = ovl == 5 && mode == 0 && rd32(RAM_MENU_TYPE) == MENU_TYPE_MAP;
+    int ctx = list_active() ? 4 : grid_active() ? 6 : menu ? 2 : smap ? 5
+            : battle && (mode == 0 || mode == 2) && rd8(RAM_CUR_COL) != 0xFF ? 1 : battle ? 3 : 0;   /* 0xFF: cursor hidden */
+    if (!battle && !smap && ctx != 2 && ctx != 4) mode = ctx == 6 ? 100 + (int)(rd32(GRID_MODE) != 0) : -1;
     if (ctx != s_last_ctx || mode != s_last_mode) {   /* screen / mode changed: re-anchor the pointer */
-        s_confirm_wait = 0; s_map_valid = 0; s_menu_valid = 0; s_list_valid = 0;
+        s_confirm_wait = 0; s_map_valid = 0; s_menu_valid = 0; s_list_valid = 0; s_grid_valid = 0;
         s_last_ctx = ctx; s_last_mode = mode;
     }
     /* a click placed something: confirm once the game has taken it */
@@ -340,14 +416,14 @@ void mouse_update(void) {
         }
     } else if (ctx == 2) {                            /* battle list menu: the pointer walks the items */
         int last = (s32)rd32(RAM_MENU_LAST), cur = (s32)rd32(RAM_MENU_INDEX);
-        if (!s_menu_valid) { s_menu_y = MENU_Y0 + (cur + 0.5) * MENU_DY; s_menu_valid = 1; }
+        if (!s_menu_valid) { double x, y; menu_item_box(cur, &x, &y); s_menu_y = y + MENU_H / 2; s_menu_valid = 1; }
         if (s_moved) {
+            double x0, y0, x1, y1; menu_item_box(0, &x0, &y0); menu_item_box(last, &x1, &y1);
             if (abs_move) s_menu_y = s_vy; else s_menu_y += mvy;
-            double y0 = MENU_Y0 + 0.5, y1 = MENU_Y0 + (last + 1) * MENU_DY - 0.5;
-            if (s_menu_y < y0) s_menu_y = y0;
-            if (s_menu_y > y1) s_menu_y = y1;
-            int k = menu_item_at((MENU_X0 + MENU_X1) / 2, s_menu_y);
-            if (k >= 0 && k != cur) wr32(RAM_MENU_INDEX, (u32)k);
+            if (s_menu_y < y0 + 0.5) s_menu_y = y0 + 0.5;
+            if (s_menu_y > y1 + MENU_H - 0.5) s_menu_y = y1 + MENU_H - 0.5;
+            int k = menu_item_row(s_menu_y);
+            if (k != cur) wr32(RAM_MENU_INDEX, (u32)k);
         }
         s_moved = 0;
         if (s_left) {
@@ -361,6 +437,74 @@ void mouse_update(void) {
             s_confirm_menu = k; s_confirm_addr = RAM_MENU_INDEX; s_confirm_wait = 2; s_cool = 20;
             return;
         }
+    } else if (ctx == 5) {                            /* strategy map: the quill follows the pointer */
+        u32 gx = rd32(RAM_CUR_WX), gz = rd32(RAM_CUR_WZ);
+        if (!s_map_valid || gx != s_wr_x || gz != s_wr_z) {   /* the game moved it: continue from there */
+            s_wx = (s32)gx / 8192.0; s_wz = (s32)gz / 8192.0;
+            s_wr_x = gx; s_wr_z = gz; s_map_valid = 1;
+            double sx, sy; smap_to_screen(s_wx, s_wz, &sx, &sy); warp_os_pointer(sx, sy);
+            s_moved = 0;
+        }
+        if (s_moved) {
+            double sx, sy, wx, wz;
+            if (abs_move) { sx = s_vx; sy = s_vy; }
+            else { smap_to_screen(s_wx, s_wz, &sx, &sy); sx += mvx; sy += mvy; }
+            if (sy < 0) sy = 0;
+            if (sy > disp_h() - 1) sy = disp_h() - 1;
+            smap_to_world(sx, sy, &wx, &wz);
+            /* a little past the camera box: the game's camera follows, so pushing on scrolls */
+            double cu, cv; smap_cam(&cu, &cv);
+            if (wx < cu - SMAP_U - 0.4) wx = cu - SMAP_U - 0.4;
+            if (wx > cu + SMAP_U + 0.4) wx = cu + SMAP_U + 0.4;
+            if (wz < cv + SMAP_V0 - 0.3) wz = cv + SMAP_V0 - 0.3;
+            if (wz > cv + SMAP_V1 + 0.3) wz = cv + SMAP_V1 + 0.3;
+            if (wx < 0) wx = 0;
+            if (wz < 0) wz = 0;
+            s_wx = wx; s_wz = wz;
+            s_wr_x = (u32)(s32)lround(wx * 8192.0); s_wr_z = (u32)(s32)lround(wz * 8192.0);
+            wr32(RAM_CUR_WX, s_wr_x); wr32(RAM_CUR_WZ, s_wr_z);
+        }
+        s_moved = 0;
+        if (s_left) { s_left = 0; start_pulse(B_CIRCLE); s_cool = 20; return; }
+    } else if (ctx == 6) {                            /* Organize squad grid / stock */
+        GridLayout g = grid_layout();
+        u32 gx = rd32(GRID_X), gy = rd32(GRID_Y);
+        double scroll = (s32)rd32(g.scroll_addr);
+        if (!s_grid_valid || gx != s_grid_wx || gy != s_grid_wy) {   /* new screen, or the pad moved it */
+            s_grid_sx = (s32)gx + 33 - 12; s_grid_sy = (s32)gy - scroll + g.top - 6;
+            s_grid_wx = gx; s_grid_wy = gy; s_grid_valid = 1;
+            warp_os_pointer(s_grid_sx, s_grid_sy);
+            s_moved = 0;
+        }
+        if (s_moved && (g.scroll_addr != GRID_SCROLL || rd32(GRID_SCROLLV) == 0)) {
+            if (abs_move) { s_grid_sx = s_vx; s_grid_sy = s_vy; }
+            else { s_grid_sx += mvx; s_grid_sy += mvy; }
+            /* cell under the pointer; the row band runs from 22 px above the quill to 22 below */
+            double cy = g.top - 6 - g.pitch / 2;
+            int col = (int)floor((s_grid_sx - 0) / 42.0);
+            int vr = (int)floor((s_grid_sy - cy) / g.pitch);
+            if (col < 0) col = 0;
+            if (col > 6) col = 6;
+            int top = (int)lround(scroll / g.pitch);
+            int row = top + vr;
+            if (row < 0) row = 0;
+            if (row > g.rows - 1) row = g.rows - 1;
+            /* past the first / last visible row: scroll one row */
+            if (row < top) { top = row; wr32(g.scroll_addr, (u32)(s32)(top * g.pitch)); }
+            if (row > top + 2) { top = row - 2; wr32(g.scroll_addr, (u32)(s32)(top * g.pitch)); }
+            /* keep the pointer inside the grid picture */
+            double y0 = cy, y1 = cy + 3 * g.pitch - 1;
+            if (s_grid_sy < y0) s_grid_sy = y0;
+            if (s_grid_sy > y1) s_grid_sy = y1;
+            if (s_grid_sx < 0) s_grid_sx = 0;
+            if (s_grid_sx > 7 * 42 - 1) s_grid_sx = 7 * 42 - 1;
+            u32 nx = (u32)(col * 42), ny = (u32)(s32)(row * g.pitch);
+            if (nx != gx) wr32(GRID_X, nx);
+            if (ny != gy) wr32(GRID_Y, ny);
+            s_grid_wx = nx; s_grid_wy = ny;
+        }
+        s_moved = 0;
+        if (s_left) { s_left = 0; start_pulse(B_CIRCLE); s_cool = 20; return; }
     } else if (ctx == 4) {                            /* scrolling list: the pointer walks the items */
         int cur = (s32)rd32(RAM_LIST_INDEX);
         if (!s_list_valid || cur != s_list_wr) {      /* new list, or the game / keyboard moved it */

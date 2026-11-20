@@ -1,3 +1,4 @@
-# Recompiled functions that call hook_f_main_<addr>(Ctx *c) on entry (main EXE only).
-# The hook can read the arguments; the original function still runs.
-0x80021EB8   # generic scrolling list menu (magic, skills, attacks, items...): mouse.c
+# Recompiled functions that call hook_f_<seg>_<addr>(Ctx *c) on entry; the original still runs.
+# "0x<addr>" = main EXE, "ov<N>:0x<addr>" = overlay. Used by mouse.c.
+0x80021EB8       # generic scrolling list menu (magic, skills, attacks, items...)
+ov1:0x800CDB1C   # strategy: Organize squad grid / stock input (CLASS, EQUIP, ...)

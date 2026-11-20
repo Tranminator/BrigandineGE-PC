@@ -57,9 +57,10 @@ Mouse (`F2` → **Controls**): one pointer — the mouse drives the game's own c
 adjustable speed so a high-DPI mouse stays usable on the 320×240 picture; released while `F2` is open or the
 window is in the background). Battle map: move to a hex, click to select (the game still checks every
 choice), push against a screen edge to scroll; when the game moves its cursor itself (menu closed, keyboard,
-pad) the mouse continues from there; attack / spell targets are picked the same way. Battle command /
-system menus and the scrolling lists (attacks, magic, skills, items...): move up/down, click to choose,
-push past the last row or use the wheel to scroll. Right click = × (back), middle click = △, wheel =
+pad) the mouse continues from there; attack / spell targets are picked the same way. Strategy map: the
+quill follows the mouse (push past the edge to scroll), click a castle to open its menu. Icon menus
+(battle commands, castle, Organize), the Organize squad / stock grids and the scrolling lists (attacks,
+magic, skills, items...): point, click to choose, push past the last row or use the wheel to scroll. Right click = × (back), middle click = △, wheel =
 up/down; on other screens left click = ○.
 
 `F5` quick save, `F9` quick load (see below). `F1` shows all of VRAM (debug). Hold `Tab` to fast-forward.

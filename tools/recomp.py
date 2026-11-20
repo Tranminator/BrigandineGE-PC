@@ -385,7 +385,7 @@ class FuncGen:
             out += ["    }"]
         else:
             out = [f"/* {name} */", f"void {fn}(Ctx *c) {{"]
-            if self.start in self.ctx.get("hooks", ()):
+            if (seg.sid, self.start) in self.ctx.get("hooks", ()):
                 out.append(f"    hook_{fn}(c);   /* src/pc/hook_list.txt */")
         a = self.start
         while a < self.end:
@@ -502,7 +502,11 @@ def main():
     hooks = set()   # functions that call hook_<name>(c) on entry (args readable, nothing replaced)
     hook_path = os.path.join(ROOT, "src/pc/hook_list.txt")
     if os.path.exists(hook_path):
-        hooks = {int(l.split("#")[0].strip(), 16) for l in open(hook_path) if l.split("#")[0].strip()}
+        for l in open(hook_path):
+            l = l.split("#")[0].strip()
+            if l:   # "0x80021EB8" (main EXE) or "ov1:0x800CDB1C" (overlay)
+                sid, _, a = l.rpartition(":")
+                hooks.add((sid or "main", int(a, 16)))
     main_seg = segs[0]
     hle_by_addr = {a: n for a, n in main_seg.names.items() if n in hle_names}
     starts = {}
@@ -597,8 +601,8 @@ def main():
         f.write('#pragma once\n#include "rt.h"\n' + "\n".join(protos) + "\n")
         for n in sorted(hle_names):
             f.write(f"void hle_{n}(Ctx *c);\n")
-        for a in sorted(hooks):
-            f.write(f"void hook_f_main_{a:08X}(Ctx *c);\n")
+        for sid, a in sorted(hooks):
+            f.write(f"void hook_f_{sid}_{a:08X}(Ctx *c);\n")
     with open(os.path.join(OUT, "recomp_tables.c"), "w") as f:
         f.write('#include "recomp_funcs.h"\n')
         for sid, tab in tables:

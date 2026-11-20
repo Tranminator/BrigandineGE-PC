@@ -196,6 +196,11 @@ static void tab_controls(void) {
         { "Fast-forward (hold)", "Tab", "" }, { "Quick save / load", "F5 / F9", "" }, { "Change save slot", "Left Shift + Left / Right", "" },
         { "This window", "F2", "" },
     };
+    bool m = g_settings.mouse != 0;
+    if (ImGui::Checkbox("Mouse control", &m)) g_settings.mouse = m;
+    hint("Battle map: point at a hex to move the cursor there, click to select it. Everywhere: left click = "
+         "Circle, right click = Cross, wheel = Up / Down, middle click = Triangle.");
+    ImGui::Spacing();
     if (ImGui::BeginTable("keys", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {
         ImGui::TableSetupColumn("PS1"); ImGui::TableSetupColumn("Keyboard"); ImGui::TableSetupColumn("Controller");
         ImGui::TableHeadersRow();

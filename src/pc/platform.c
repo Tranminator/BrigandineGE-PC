@@ -7,6 +7,7 @@
 #include "state.h"
 #include "video_gl.h"
 #include "gpu_hw.h"
+#include "mouse.h"
 #include <SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -145,6 +146,8 @@ static void present(int skipped) {
     int dw = ow, dh = (int)(ow / aspect);
     if (dh > oh) { dh = oh; dw = (int)(oh * aspect); }
     vgl_draw((ow - dw) / 2, (oh - dh) / 2, dw, dh);
+    {   int ww, wh; SDL_GetWindowSize(g_win, &ww, &wh);
+        mouse_set_view((ow - dw) / 2, (oh - dh) / 2, dw, dh, ww ? (float)ow / ww : 1.0f); }
     ui_frame();
     /* debug: BRIG_SHOT_DIR=<dir> BRIG_SHOT_EVERY=<frames> dumps BMP snapshots of the final window image */
     static int frame_no;
@@ -152,8 +155,15 @@ static void present(int skipped) {
     const char *sf_ = getenv("BRIG_SHOT_FROM"), *st_ = getenv("BRIG_SHOT_TO");
     ++frame_no;
     {   /* debug: BRIG_GPUDUMP=<n> logs the GP0 packets that build the image shown at snapshot frame n */
-        static int dump = -2; if (dump == -2) { const char *e2 = getenv("BRIG_GPUDUMP"); dump = e2 ? atoi(e2) : -1; }
-        g_gpu_dump = (frame_no + 1 == dump);
+        static int dump = -2, dump_to = -1;   /* BRIG_GPUDUMP=<n> or <a>-<b> */
+        if (dump == -2) {
+            const char *e2 = getenv("BRIG_GPUDUMP");
+            dump = e2 ? atoi(e2) : -1;
+            const char *dash = e2 ? strchr(e2, '-') : NULL;
+            dump_to = dash ? atoi(dash + 1) : dump;
+        }
+        g_gpu_dump = (frame_no + 1 >= dump && frame_no + 1 <= dump_to);
+        if (g_gpu_dump) rt_log("[gp0] ---- frame %d cursor col=%u row=%u cam %d %d ofs %d %d", frame_no + 1, rd8(0x800E7C48), rd8(0x800E7C50), (int)rd32(0x800A6AB4), (int)rd32(0x800A6AB8), g_gpu.ofs_x, g_gpu.ofs_y);
     }
     int in_range = (!sf_ || frame_no >= atoi(sf_)) && (!st_ || frame_no <= atoi(st_));
     if (dir && ev && atoi(ev) > 0 && in_range && (frame_no % atoi(ev)) == 0) {
@@ -182,7 +192,20 @@ static void inject_keys(void) {
         const char *p = colon + 1;
         while (*p && *p != ',' && n < 31) name[n++] = *p++;
         name[n] = 0;
-        if (f == frame) {
+        if (f == frame && (!strncmp(name, "Move=", 5) || !strncmp(name, "Click=", 6) || !strncmp(name, "RClick=", 7))) {
+            /* scripted mouse (window points): Move=x;y, Click=x;y, RClick=x;y */
+            const char *xy = strchr(name, '=') + 1;
+            int mx = atoi(xy), my = strchr(xy, ';') ? atoi(strchr(xy, ';') + 1) : 0;
+            SDL_Event ev; memset(&ev, 0, sizeof ev);
+            ev.type = SDL_MOUSEMOTION; ev.motion.x = mx; ev.motion.y = my;
+            SDL_PushEvent(&ev);
+            if (name[0] != 'M') {
+                memset(&ev, 0, sizeof ev);
+                ev.type = SDL_MOUSEBUTTONDOWN; ev.button.x = mx; ev.button.y = my;
+                ev.button.button = name[0] == 'R' ? SDL_BUTTON_RIGHT : SDL_BUTTON_LEFT;
+                SDL_PushEvent(&ev);
+            }
+        } else if (f == frame) {
             SDL_Event ev; memset(&ev, 0, sizeof ev);
             int shift = !strncmp(name, "Shift+", 6);   /* "Shift+Right" = with Left Shift held */
             ev.type = SDL_KEYDOWN; ev.key.keysym.sym = SDL_GetKeyFromName(shift ? name + 6 : name);
@@ -219,6 +242,11 @@ void platform_vblank(void) {
     while (SDL_PollEvent(&e)) {
         if (e.type == SDL_QUIT) g_quit = 1;
         if (ui_event(&e)) continue;                   /* settings UI (F2) consumed it */
+        if (mouse_event(&e)) continue;
+        if (e.type == SDL_KEYDOWN) {                  /* keyboard d-pad takes over from the mouse */
+            SDL_Keycode kc = e.key.keysym.sym;
+            if (kc == SDLK_UP || kc == SDLK_DOWN || kc == SDLK_LEFT || kc == SDLK_RIGHT) mouse_cancel();
+        }
         if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_F1) g_show_vram ^= 1;
         if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.sym == SDLK_F5) state_request_save(state_slot());
         if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.sym == SDLK_F9) state_request_load(state_slot());
@@ -285,6 +313,7 @@ void platform_vblank(void) {
         else if (now - g_next_frame > freq / 4) g_next_frame = now;
     }
     if ((Sint64)(now - g_ideal) > (Sint64)(freq / 4) || (Sint64)(g_ideal - now) > (Sint64)(freq / 4)) g_ideal = now;
+    mouse_update();
     int skipped = g_skip_this_frame;
     present(skipped);
     last_wake = SDL_GetPerformanceCounter();
@@ -316,6 +345,7 @@ u16 platform_pad_buttons(void) {
     const Uint8 *k = SDL_GetKeyboardState(NULL);
     u16 b = scripted_buttons();
     if (ui_is_open()) return 0;   /* settings UI has the keyboard and pad */
+    b |= mouse_pad_bits();
     if (k[SDL_SCANCODE_BACKSPACE] || k[SDL_SCANCODE_RSHIFT]) b |= 1 << 0;
     if (k[SDL_SCANCODE_RETURN]) b |= 1 << 3;
     if (!k[SDL_SCANCODE_LSHIFT]) {   /* Left Shift + arrows changes the save slot instead */

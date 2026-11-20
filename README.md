@@ -75,10 +75,21 @@ Debug env vars: `BRIG_TRACE=1` (per-second GPU stats), `BRIG_SHOT_DIR=<dir> BRIG
 (BMP snapshots), `BRIG_INPUT="frame:hexmask,..."` (scripted pad input), `BRIG_SHOW_VRAM=1`,
 `BRIG_CDTRACE=1` (CD commands), `BRIG_SNDTRACE=1` (libsnd calls + active SPU voices), `BRIG_WAV=<file.wav>`
 (record audio output), `BRIG_MUTE_XA=1` (SPU only), `BRIG_REVERB_ONLY=1` (reverb wet signal only), `BRIG_MUTE_SPU=1` (XA only), `BRIG_KEYS="frame:KeyName,..."` (scripted keyboard keys), `BRIG_FAST=1` (unthrottled), `BRIG_SKIP_MOVIES=1`,
-`BRIG_SHOT_FROM`/`BRIG_SHOT_TO` (snapshot range), `BRIG_SLOW_MS=<n>` (simulate a slow machine), `BRIG_UI_TAB=<0-4>`, `BRIG_STATE_DIR=<dir>` (save-slot folder, for tests), `BRIG_SHADER=<name>`, `BRIG_SHADER_CFG=<file>`.
+`BRIG_SHOT_FROM`/`BRIG_SHOT_TO` (snapshot range), `BRIG_SLOW_MS=<n>` (simulate a slow machine), `BRIG_UI_TAB=<0-4>`, `BRIG_STATE_DIR=<dir>` (save-slot folder, for tests), `BRIG_SHADER=<name>`, `BRIG_SHADER_CFG=<file>`, `BRIG_SCALE=<1-8>` (internal resolution). `F10` (hardware renderer only) writes renderer diagnostics to
+`<pref>/debug/` (scaled vs software VRAM images) and `states/debug.state` (`BRIG_DEBUG_DIR` overrides the folder).
+
+## Renderer (internal resolution)
+`F2` → **Graphics** → **Internal resolution**:
+- **Native** (default) — the software renderer, pixel-exact PS1 picture (320×240, dithered).
+- **2x … 8x** — the hardware renderer: the graphics card draws every polygon, sprite and line
+  again at N× resolution (sharper polygon edges and 3D, smooth colour gradients without dither
+  noise). Textures, palettes and all four PS1 semi-transparency modes are reproduced; the software
+  renderer keeps running underneath as the reference VRAM, so the game logic sees no difference.
+  Movies are shown from the software image. Measured cost on an Apple M1: about +1 ms per frame at 4x, +2.5 ms at 8x.
+- Scanline / CRT shaders are designed around 240 lines and look best at Native.
 
 ## Display shaders
-The image is drawn with OpenGL 3.2 through a shader, chosen in `F2` → **Graphics**:
+The image is drawn with OpenGL 3.3 through a shader, chosen in `F2` → **Graphics**:
 - **Sharp** (default) — crisp pixels with even widths at any window size.
 - **Pixel** — raw nearest-neighbour. **Smooth** — bilinear.
 - **Scanlines** — TV-style line gaps. **CRT** — curved screen, scanlines, shadow mask, glow.

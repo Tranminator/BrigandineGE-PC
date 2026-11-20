@@ -2,6 +2,7 @@
 #include "gpu.h"
 #include "state.h"
 #include "rt.h"
+#include "gpu_hw.h"
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -15,6 +16,7 @@ static inline int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? 
 void gpu_reset(void) {
     memset(g_vram, 0, sizeof g_vram);
     memset(&g_gpu, 0, sizeof g_gpu);
+    hw_invalidate();
     g_gpu.area_x1 = VRAM_W - 1;
     g_gpu.area_y1 = VRAM_H - 1;
     g_gpu.disp_w = 320; g_gpu.disp_h = 240;
@@ -210,8 +212,10 @@ void gpu_gp0_packet(const u32 *w, int n) {
         int x = (w[1] & 0x3F0), y = (w[1] >> 16) & 0x1FF;
         int ww = ((w[2] & 0x3FF) + 15) & ~15, hh = (w[2] >> 16) & 0x1FF;
         u16 c = rgb24to15(w[0] & 255, (w[0] >> 8) & 255, (w[0] >> 16) & 255);
+        hw_pre_write(x, y, ww, hh);
         for (int j = 0; j < hh; j++)
             for (int i = 0; i < ww; i++) g_vram[((y + j) & 511) * VRAM_W + ((x + i) & 1023)] = c;
+        hw_fill(x, y, ww, hh, c);
         return;
     }
     if (op >= 0x20 && op < 0x40) {
@@ -234,7 +238,12 @@ void gpu_gp0_packet(const u32 *w, int n) {
                 if (i == 1) { tp = (uv >> 16) & 0x1FF; g_gpu.semi_mode = (uv >> 21) & 3; g_gpu.texpage = tp; }
             }
         }
-        if (semi && tex) { /* semi mode already updated from tpage */ }
+        if (g_hw_on) {
+            HwV hv[4];
+            for (int i = 0; i < nv; i++) { hv[i].x = v[i].x; hv[i].y = v[i].y; hv[i].r = v[i].r; hv[i].g = v[i].g;
+                                           hv[i].b = v[i].b; hv[i].u = v[i].u; hv[i].v = v[i].v; }
+            hw_poly(hv, nv, gour, tex, raw, semi, tp, clut);
+        }
         draw_tri(v[0], v[1], v[2], gour, tex, raw, semi, tp, clut);
         if (quad) draw_tri(v[1], v[2], v[3], gour, tex, raw, semi, tp, clut);
         return;
@@ -254,7 +263,13 @@ void gpu_gp0_packet(const u32 *w, int n) {
             Vtx cur = { sx11(w[k]) + g_gpu.ofs_x, sx11(w[k] >> 16) + g_gpu.ofs_y,
                         (int)(col & 255), (int)((col >> 8) & 255), (int)((col >> 16) & 255), 0, 0 };
             k++;
-            if (!first) draw_line(prev, cur, gour, semi);
+            if (!first) {
+                if (g_hw_on) {
+                    HwV ha = { prev.x, prev.y, prev.r, prev.g, prev.b, 0, 0 }, hb = { cur.x, cur.y, cur.r, cur.g, cur.b, 0, 0 };
+                    hw_line(ha, hb, gour, semi);
+                }
+                draw_line(prev, cur, gour, semi);
+            }
             prev = cur; first = 0;
             if (!(op & 8) && k >= (gour ? 4 : 3)) break;
         }
@@ -271,6 +286,7 @@ void gpu_gp0_packet(const u32 *w, int n) {
         else if (sz == 1) ww = hh = 1;
         else if (sz == 2) ww = hh = 8;
         else ww = hh = 16;
+        hw_rect(x, y, ww, hh, w[0] & 255, (w[0] >> 8) & 255, (w[0] >> 16) & 255, tex, raw, semi, u, v, clut);
         draw_rect(x, y, ww, hh, w[0] & 255, (w[0] >> 8) & 255, (w[0] >> 16) & 255, tex, raw, semi, u, v, clut);
         return;
     }
@@ -278,12 +294,14 @@ void gpu_gp0_packet(const u32 *w, int n) {
         int sx = w[1] & 1023, sy = (w[1] >> 16) & 511, dx = w[2] & 1023, dy = (w[2] >> 16) & 511;
         int ww = w[3] & 0xFFFF, hh = w[3] >> 16;
         ww = ww ? ww : 1024; hh = hh ? hh : 512;
+        hw_pre_write(dx, dy, ww, hh);
         u16 *tmp = malloc((size_t)ww * hh * 2);
         for (int j = 0; j < hh; j++) for (int i = 0; i < ww; i++)
             tmp[j * ww + i] = g_vram[((sy + j) & 511) * VRAM_W + ((sx + i) & 1023)];
         for (int j = 0; j < hh; j++) for (int i = 0; i < ww; i++)
             g_vram[((dy + j) & 511) * VRAM_W + ((dx + i) & 1023)] = tmp[j * ww + i];
         free(tmp);
+        hw_copy(sx, sy, dx, dy, ww, hh);
         return;
     }
     switch (op) {
@@ -294,7 +312,9 @@ void gpu_gp0_packet(const u32 *w, int n) {
     case 0xE3: g_gpu.area_x0 = w[0] & 1023; g_gpu.area_y0 = (w[0] >> 10) & 511; return;
     case 0xE4: g_gpu.area_x1 = w[0] & 1023; g_gpu.area_y1 = (w[0] >> 10) & 511; return;
     case 0xE5: g_gpu.ofs_x = sx11(w[0]); g_gpu.ofs_y = sx11(w[0] >> 11); return;
-    case 0xE6: g_gpu.mask_set = w[0] & 1; g_gpu.mask_check = (w[0] >> 1) & 1; return;
+    case 0xE6: g_gpu.mask_set = w[0] & 1; g_gpu.mask_check = (w[0] >> 1) & 1;
+        if ((w[0] & 3) && getenv("BRIG_MASKTRACE")) rt_log("[gpu] E6 mask %u", w[0] & 3);
+        return;
     }
 }
 
@@ -314,8 +334,10 @@ void gpu_gp0_stream(const u32 *w, int n) {
             int x = w[i + 1] & 1023, y = (w[i + 1] >> 16) & 511, ww = w[i + 2] & 0xFFFF, hh = w[i + 2] >> 16;
             int words = (ww * hh + 1) / 2;
             const u16 *src = (const u16 *)&w[i + 3];
+            hw_pre_write(x, y, ww, hh);
             for (int j = 0; j < hh; j++) for (int k = 0; k < ww; k++)
                 g_vram[((y + j) & 511) * VRAM_W + ((x + k) & 1023)] = src[j * ww + k];
+            hw_upload(x, y, ww, hh);
             i += 3 + words;
             continue;
         }
@@ -329,5 +351,5 @@ void gpu_gp0_stream(const u32 *w, int n) {
 void gpu_state(StateIO *s) {
     st_io(s, g_vram, sizeof g_vram);
     ST(s, g_gpu);
-    if (s->load) g_gpu_skip_draw = 0;
+    if (s->load) { g_gpu_skip_draw = 0; hw_invalidate(); }
 }

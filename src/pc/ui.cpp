@@ -5,6 +5,7 @@
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_opengl3.h"
 #include "video_gl.h"
+#include "gpu_hw.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -119,6 +120,19 @@ static void tab_graphics(void) {
     int fs = g_settings.frameskip;
     if (ImGui::Combo("Frame skip", &fs, skip_names, IM_ARRAYSIZE(skip_names))) g_settings.frameskip = fs;
     hint("Skips drawing on slow machines so the game keeps its normal speed.");
+
+    ImGui::SeparatorText("Renderer");
+    {
+        static const char *names[] = { "Native (software, 320x240)", "2x", "3x", "4x", "5x", "6x", "7x", "8x" };
+        int maxs = hw_max_scale(), cur_s = g_settings.render_scale < 1 ? 1 : g_settings.render_scale;
+        if (ImGui::BeginCombo("Internal resolution", names[cur_s - 1])) {
+            for (int s = 1; s <= maxs && s <= 8; s++)
+                if (ImGui::Selectable(names[s - 1], s == cur_s)) { g_settings.render_scale = s; platform_apply_video(); }
+            ImGui::EndCombo();
+        }
+        hint("2x and up draw the game with the graphics card at a higher resolution: sharper 3D, smooth "
+             "colour gradients. Native is the exact PS1 picture. Scanline/CRT shaders look best at Native.");
+    }
 
     ImGui::SeparatorText("Shader");
     int cur = vgl_shader_current();

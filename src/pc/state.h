@@ -28,6 +28,7 @@ void kanji_state(StateIO *s);    /* BIOS-font replacement glyph slots */
 /* slots: 1..10 manual, AUTO_BASE+1..AUTO_BASE+AUTO_COUNT autosaves */
 #define AUTO_BASE  100
 #define AUTO_COUNT 3
+#define STATE_DEBUG_SLOT 99   /* states/debug.state (F10 renderer diagnostics), not shown in the UI */
 #define THUMB_W    160
 #define THUMB_H    120
 

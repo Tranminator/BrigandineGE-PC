@@ -75,7 +75,8 @@ static void state_dir(char *out, size_t n) {
 
 static void slot_path(int slot, char *out, size_t n) {
     char dir[1024]; state_dir(dir, sizeof dir);
-    if (slot > AUTO_BASE) snprintf(out, n, "%sauto%d.state", dir, slot - AUTO_BASE);
+    if (slot == STATE_DEBUG_SLOT) snprintf(out, n, "%sdebug.state", dir);
+    else if (slot > AUTO_BASE) snprintf(out, n, "%sauto%d.state", dir, slot - AUTO_BASE);
     else snprintf(out, n, "%sslot%d.state", dir, slot);
 }
 
@@ -154,7 +155,8 @@ static int write_state(Ctx *c, int slot) {
 }
 
 void state_slot_name(int slot, char *out, size_t n) {
-    if (slot > AUTO_BASE) snprintf(out, n, "Autosave %d", slot - AUTO_BASE);
+    if (slot == STATE_DEBUG_SLOT) snprintf(out, n, "Debug state");
+    else if (slot > AUTO_BASE) snprintf(out, n, "Autosave %d", slot - AUTO_BASE);
     else snprintf(out, n, "Slot %d", slot);
 }
 

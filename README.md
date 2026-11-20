@@ -53,8 +53,9 @@ cmake -S . -B build/cmake && cmake --build build/cmake -j8
 | L2 / R2 | 1 / 3 | LT / RT |
 | Start / Select | Enter / Backspace | Start / Back |
 
-Mouse (can be turned off in `F2` → **Controls**): on the battle map the cursor follows the mouse and a click
-selects the hex; elsewhere left click = ○, right click = ×, wheel = up/down, middle click = △.
+Mouse (can be turned off in `F2` → **Controls**): on the battle map the hex under the mouse is highlighted
+instantly and a click selects it (units, move / attack targets — the game still checks every choice);
+elsewhere left click = ○, right click = ×, wheel = up/down, middle click = △.
 
 `F5` quick save, `F9` quick load (see below). `F1` shows all of VRAM (debug). Hold `Tab` to fast-forward.
 

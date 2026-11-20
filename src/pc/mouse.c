@@ -2,10 +2,11 @@
  *
  * Everywhere: left click = Circle, right click = Cross, wheel = Up/Down, middle click = Triangle.
  *
- * Battle map: the hex under the mouse is computed from the game's own projection, and the
- * game's cursor is walked there with virtual d-pad presses (one hex per press, checked
- * against RAM), so the game reacts exactly as to a pad: unit panel, camera scroll, range
- * limits. A click confirms (Circle) once the cursor has arrived.
+ * Battle map: the hex under the mouse is computed from the game's own projection and the
+ * game's cursor is placed on it directly (its world position, which the game turns into the
+ * current hex every frame: unit panel, highlight and camera follow update by themselves),
+ * so hovering highlights instantly and a click selects at once. The game still validates
+ * every choice itself (a click on a hex outside the move range is refused as with a pad).
  *
  * The battle map is a tilted plane: hex (col,row) has world position (col, row - 0.5 for even
  * columns), and the screen position is a homography of (world - camera). The homography and
@@ -21,8 +22,11 @@
 
 /* battle RAM */
 #define OVL_ID_ADDR     0x800B6838u   /* overlay id: 6 = battle */
-#define RAM_CUR_COL     0x800E7C48u   /* current; 0x800E7C49..4C hold the previous 4 positions */
+#define RAM_CUR_COL     0x800E7C48u   /* current hex; 0x800E7C49..4C hold the previous 4 positions */
 #define RAM_CUR_ROW     0x800E7C50u
+#define RAM_CUR_WX      0x800A6AB4u   /* cursor world position, 8192 per column (s32) */
+#define RAM_CUR_WZ      0x800A6AB8u   /* 8192 per row, +4096 on odd columns */
+#define MAP_SIZE        32            /* every battle map is a 32x32 hex grid */
 #define RAM_CAM_X       0x800A6794u   /* s32 */
 #define RAM_CAM_Z       0x800A6798u   /* s32 */
 #define RAM_INPUT_MODE  0x800A6994u   /* 0 free cursor, 1 menu open, 2 choosing a hex */
@@ -54,8 +58,14 @@ static u16 s_pulse_bits;                   /* button pulse in progress */
 static int s_pulse_frames, s_gap_frames;
 static int s_queue_circle, s_queue_cross, s_queue_tri, s_queue_up, s_queue_down;
 
-static int s_has_target, s_tcol, s_trow, s_confirm_on_arrival;
-static int s_step_wait, s_settle, s_retries, s_last_col = -1, s_last_row = -1;
+static int s_hover_col = -1, s_hover_row = -1;
+static int s_click_pending;                /* Circle once the cursor sits on the clicked hex */
+
+/* put the game's cursor on a hex (instant; the game derives everything else) */
+static void place_cursor(int col, int row) {
+    wr32(RAM_CUR_WX, (u32)(col << 13));
+    wr32(RAM_CUR_WZ, (u32)((row << 13) + ((col & 1) ? 4096 : 0)));
+}
 
 void mouse_set_view(int x, int y, int w, int h, float px_per_pt) {
     s_view_x = x; s_view_y = y; s_view_w = w; s_view_h = h; s_px_per_pt = px_per_pt > 0 ? px_per_pt : 1.0f;
@@ -101,7 +111,7 @@ static int hex_at(double sx, double sy, int *col, int *row) {
             if (dist < best) { best = dist; bc = cc; br = r2; }
         }
     }
-    if (bc < 0 || br < 0 || bc > 255 || br > 255) return 0;
+    if (bc < 0 || br < 0 || bc >= MAP_SIZE || br >= MAP_SIZE) return 0;
     *col = bc; *row = br;
     return 1;
 }
@@ -117,10 +127,10 @@ int mouse_event(const SDL_Event *e) {
         if (e->button.button == SDL_BUTTON_LEFT) {
             double dx, dy; int col, row;
             if (battle_cursor_active() && to_display(&dx, &dy) && hex_at(dx, dy, &col, &row)) {
-                s_has_target = 1; s_tcol = col; s_trow = row; s_confirm_on_arrival = 1; s_step_wait = 0;
+                place_cursor(col, row); s_hover_col = col; s_hover_row = row; s_click_pending = 3;
             } else s_queue_circle++;
         } else if (e->button.button == SDL_BUTTON_RIGHT) {
-            s_has_target = 0; s_confirm_on_arrival = 0; s_queue_cross++;
+            s_click_pending = 0; s_queue_cross++;
         } else if (e->button.button == SDL_BUTTON_MIDDLE) s_queue_tri++;
         return 1;
     case SDL_MOUSEWHEEL:
@@ -132,7 +142,7 @@ int mouse_event(const SDL_Event *e) {
     return 0;
 }
 
-void mouse_cancel(void) { s_has_target = 0; s_confirm_on_arrival = 0; }
+void mouse_cancel(void) { s_click_pending = 0; }
 
 static void start_pulse(u16 bits) { s_pulse_bits = bits; s_pulse_frames = 6; s_gap_frames = 2; }
 
@@ -141,43 +151,26 @@ void mouse_update(void) {
     if (s_gap_frames > 0) { s_gap_frames--; return; }
 
     int active = battle_cursor_active();
-    if (!active) s_has_target = 0;
+    if (!active) { s_click_pending = 0; s_hover_col = -1; }
 
-    /* hover: the cursor follows the mouse on the battle map */
-    if (active && s_moved && !s_confirm_on_arrival) {
+    if (active && s_click_pending) {                /* give the game a frame to take the new hex */
+        if (--s_click_pending == 0 && rd8(RAM_CUR_COL) == s_hover_col && rd8(RAM_CUR_ROW) == s_hover_row)
+            start_pulse(B_CIRCLE);
+        s_moved = 0;
+        return;
+    }
+
+    /* hover: the cursor jumps to the hex under the mouse whenever the mouse moves to a new hex */
+    if (active && s_moved) {
         double dx, dy; int col, row;
-        if (to_display(&dx, &dy) && hex_at(dx, dy, &col, &row) &&
-            (!s_has_target || col != s_tcol || row != s_trow)) {
-            s_has_target = 1; s_tcol = col; s_trow = row; s_step_wait = 0; s_retries = 0;
-            if (getenv("BRIG_TRACE")) rt_log("[mouse] hover -> hex %d,%d (display %.0f,%.0f), cursor %d,%d", col, row, dx, dy,
-                                             rd8(RAM_CUR_COL), rd8(RAM_CUR_ROW));
+        if (to_display(&dx, &dy) && hex_at(dx, dy, &col, &row) && (col != s_hover_col || row != s_hover_row ||
+                                                                   col != rd8(RAM_CUR_COL) || row != rd8(RAM_CUR_ROW))) {
+            place_cursor(col, row);
+            s_hover_col = col; s_hover_row = row;
+            if (getenv("BRIG_TRACE")) rt_log("[mouse] hover -> hex %d,%d (display %.0f,%.0f)", col, row, dx, dy);
         }
     }
     s_moved = 0;
-
-    if (s_has_target) {
-        int col = rd8(RAM_CUR_COL), row = rd8(RAM_CUR_ROW);
-        if (s_settle > 0) { s_settle--; return; }    /* let the cursor slide finish */
-        if (s_step_wait > 0) {                       /* waiting for the last press to move the cursor */
-            if (col != s_last_col || row != s_last_row) { s_step_wait = 0; s_retries = 0; s_settle = 4; return; }
-            if (--s_step_wait > 0) return;
-            if (++s_retries >= 4) {                  /* stuck: map edge / out of range */
-                if (getenv("BRIG_TRACE")) rt_log("[mouse] cursor stuck at %d,%d (target %d,%d)", col, row, s_tcol, s_trow);
-                s_has_target = 0; s_confirm_on_arrival = 0; s_retries = 0;
-                return;
-            }
-        }
-        if (col == s_tcol && row == s_trow) {
-            s_has_target = 0; s_retries = 0;
-            if (getenv("BRIG_TRACE")) rt_log("[mouse] cursor arrived at %d,%d%s", col, row, s_confirm_on_arrival ? " -> Circle" : "");
-            if (s_confirm_on_arrival) { s_confirm_on_arrival = 0; start_pulse(B_CIRCLE); }
-            return;
-        }
-        u16 dir = col < s_tcol ? B_RIGHT : col > s_tcol ? B_LEFT : row < s_trow ? B_DOWN : B_UP;
-        s_last_col = col; s_last_row = row; s_step_wait = 10;
-        start_pulse(dir);
-        return;
-    }
 
     if (s_queue_cross) { s_queue_cross--; start_pulse(B_CROSS); }
     else if (s_queue_circle) { s_queue_circle--; start_pulse(B_CIRCLE); }

@@ -236,9 +236,27 @@ static void decide_frameskip(Uint64 now, Uint64 period) {
     g_gpu_skip_draw = skip;
 }
 
+/* debug: BRIG_POKE="frame:addr=value,..." writes 32-bit words into PS1 RAM at a frame (hex addr/value) */
+static void poke_ram(void) {
+    static int frame;
+    const char *s = getenv("BRIG_POKE");
+    frame++;
+    if (!s) return;
+    while (*s) {
+        int f = atoi(s);
+        const char *colon = strchr(s, ':'), *eq = colon ? strchr(colon, '=') : NULL;
+        if (!colon || !eq) break;
+        if (f == frame) wr32((u32)strtoul(colon + 1, NULL, 16), (u32)strtoul(eq + 1, NULL, 16));
+        const char *comma = strchr(eq, ',');
+        if (!comma) break;
+        s = comma + 1;
+    }
+}
+
 void platform_vblank(void) {
     SDL_Event e;
     inject_keys();
+    poke_ram();
     while (SDL_PollEvent(&e)) {
         if (e.type == SDL_QUIT) g_quit = 1;
         if (ui_event(&e)) continue;                   /* settings UI (F2) consumed it */

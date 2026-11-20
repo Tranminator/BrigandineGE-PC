@@ -57,7 +57,7 @@
 #define MENU_POS        0x800ADCE0u   /* per item: x, y (s32, 8.8 fixed); the icon is at x - 8 */
 #define MENU_W          80.0          /* item box: x - 8 .. x + 72, y - 3 .. y + 16 */
 #define MENU_H          19.0
-#define MENU_TYPE_MAP   100           /* strategy map, no menu open */
+#define RAM_UI_FLAGS    0x800A6AB0u   /* bit 0: a free cursor takes input (map / grid), bit 8: strategy map */
 #define PANEL_Y 198.0                 /* the unit / terrain panel starts here (not map) */
 /* generic scrolling list (main EXE func 80021EB8: magic, skills, attacks, items...), $gp-relative */
 #define RAM_LIST_TOP    0x800A6820u   /* first visible item */
@@ -79,7 +79,9 @@ static const double KX = 3.260455542e+01, KZ = 3.198126134e+01;
 
 /* PS1 pad bits */
 #define B_UP     (1u << 4)
+#define B_RIGHT  (1u << 5)
 #define B_DOWN   (1u << 6)
+#define B_LEFT   (1u << 7)
 #define B_TRI    (1u << 12)
 #define B_CIRCLE (1u << 13)
 #define B_CROSS  (1u << 14)
@@ -127,10 +129,12 @@ void hook_f_main_80021EB8(Ctx *c) {
 #define GRID_Y       0x800DC66Cu
 #define GRID_SCROLL2 0x800DC670u   /* stock */
 #define GRID_SCROLLV 0x800DC688u   /* squads: scroll animation speed, 0 = still */
+#define GRID_SCROLLN 0x800DC84Cu   /* squads: scroll animation frames left */
 #define RAM_KNIGHTS  0x800A690Cu   /* knights in the castle = squad rows */
 static unsigned s_grid_seen;
 static double s_grid_sx, s_grid_sy;        /* grid pointer, display pixels */
 static int s_grid_valid;
+static double s_grid_push_x, s_grid_push_y;   /* pointer pushed past the grid edge */
 static u32 s_grid_wx = 0xFFFFFFFF, s_grid_wy = 0xFFFFFFFF;
 void hook_f_ov1_800CDB1C(Ctx *c) { (void)c; s_grid_seen = s_frame; }
 static int grid_active(void) {
@@ -145,17 +149,30 @@ static GridLayout grid_layout(void) {
     if (g.rows < 1) g.rows = 1;
     return g;
 }
-static int list_active(void) {
-    return s_frame - s_list_seen <= 2 && s_list_count > 0 && (s32)rd32(RAM_LIST_STATE) == 2;
-}
+/* The strategy troop pickers (main func 80022C84: MOVE / QUEST "Select Troop"...) share the list's
+ * variables and window but have their own loop: no hook, no scrolling, all rows shown, so the item
+ * count comes from the window height (rows * 16 + 14). */
+static int s_list_fixed;
 static void list_window(double *x, double *y, double *w) {
     u32 e = WIN_TABLE + 18 * rd32(RAM_LIST_WIN);
     *x = (s16)rd16(e); *y = (s16)rd16(e + 2); *w = (s16)rd16(e + 4);
 }
+static int list_active(void) {
+    if ((s32)rd32(RAM_LIST_STATE) != 2) return 0;
+    if (s_frame - s_list_seen <= 2 && s_list_count > 0) { s_list_fixed = 0; return 1; }
+    if (rd32(OVL_ID_ADDR) != 5) return 0;
+    u32 e = WIN_TABLE + 18 * rd32(RAM_LIST_WIN);
+    int h = (s16)rd16(e + 6), n = (int)lround((h - 14) / LIST_ROW);
+    if (n < 1 || n > 16) return 0;
+    s_list_fixed = 1; s_list_count = n;
+    return 1;
+}
+static int list_top(void) { return s_list_fixed ? 0 : (s32)rd32(RAM_LIST_TOP); }
+static int list_vis(void) { return s_list_fixed ? s_list_count : (s32)rd32(RAM_LIST_VIS); }
 /* list item under a display position, -1 none */
 static int list_item_at(double px, double py) {
     double x, y, w; list_window(&x, &y, &w);
-    int top = (s32)rd32(RAM_LIST_TOP), vis = (s32)rd32(RAM_LIST_VIS);
+    int top = list_top(), vis = list_vis();
     if (px < x + 8 || px >= x + w - 8 || py < y + 7) return -1;
     int k = (int)floor((py - y - 7) / LIST_ROW);
     return k >= 0 && k < vis && top + k < s_list_count ? top + k : -1;
@@ -164,7 +181,7 @@ static int list_item_at(double px, double py) {
 static void list_select(int k) {
     if (k < 0) k = 0;
     if (k > s_list_count - 1) k = s_list_count - 1;
-    int top = (s32)rd32(RAM_LIST_TOP), vis = (s32)rd32(RAM_LIST_VIS), nt = top;
+    int top = list_top(), vis = list_vis(), nt = top;
     if (k < nt) nt = k;
     if (k > nt + vis - 1) nt = k - vis + 1;
     if (nt != top) { wr32(RAM_LIST_TOP, (u32)nt); wr32(RAM_LIST_REDRAW, 2); }
@@ -351,8 +368,10 @@ void mouse_update(void) {
     u32 ovl = rd32(OVL_ID_ADDR);
     int battle = ovl == 6 && rd32(RAM_SCREEN) == 2;
     int mode = (int)rd32(RAM_INPUT_MODE);
-    int menu = (s32)rd32(RAM_MENU_LAST) >= 0 && rd32(RAM_MENU_STATE) == 2;   /* icon menu taking input */
-    int smap = ovl == 5 && mode == 0 && rd32(RAM_MENU_TYPE) == MENU_TYPE_MAP;
+    u32 flags = rd32(RAM_UI_FLAGS);
+    /* icon menu taking input (its state stays 2 after it closes; the cursor flag tells) */
+    int menu = (s32)rd32(RAM_MENU_LAST) >= 0 && rd32(RAM_MENU_STATE) == 2 && !(flags & 1);
+    int smap = ovl == 5 && (flags & 0x101) == 0x101;
     int ctx = list_active() ? 4 : grid_active() ? 6 : menu ? 2 : smap ? 5
             : battle && (mode == 0 || mode == 2) && rd8(RAM_CUR_COL) != 0xFF ? 1 : battle ? 3 : 0;   /* 0xFF: cursor hidden */
     if (!battle && !smap && ctx != 2 && ctx != 4) mode = ctx == 6 ? 100 + (int)(rd32(GRID_MODE) != 0) : -1;
@@ -472,36 +491,49 @@ void mouse_update(void) {
         double scroll = (s32)rd32(g.scroll_addr);
         if (!s_grid_valid || gx != s_grid_wx || gy != s_grid_wy) {   /* new screen, or the pad moved it */
             s_grid_sx = (s32)gx + 33 - 12; s_grid_sy = (s32)gy - scroll + g.top - 6;
-            s_grid_wx = gx; s_grid_wy = gy; s_grid_valid = 1;
+            s_grid_wx = gx; s_grid_wy = gy; s_grid_valid = 1; s_grid_push_x = s_grid_push_y = 0;
             warp_os_pointer(s_grid_sx, s_grid_sy);
             s_moved = 0;
         }
         if (s_moved && (g.scroll_addr != GRID_SCROLL || rd32(GRID_SCROLLV) == 0)) {
-            if (abs_move) { s_grid_sx = s_vx; s_grid_sy = s_vy; }
-            else { s_grid_sx += mvx; s_grid_sy += mvy; }
-            /* cell under the pointer; the row band runs from 22 px above the quill to 22 below */
-            double cy = g.top - 6 - g.pitch / 2;
-            int col = (int)floor((s_grid_sx - 0) / 42.0);
-            int vr = (int)floor((s_grid_sy - cy) / g.pitch);
-            if (col < 0) col = 0;
-            if (col > 6) col = 6;
+            double dx = abs_move ? s_vx - s_grid_sx : mvx, dy = abs_move ? s_vy - s_grid_sy : mvy;
+            s_grid_sx += dx; s_grid_sy += dy;
             int top = (int)lround(scroll / g.pitch);
-            int row = top + vr;
+            double y0 = g.top - 6 - g.pitch / 2, y1 = y0 + 3 * g.pitch - 1;   /* the 3 visible rows */
+            double x1 = 7 * 42 - 1;
+            /* pushing past the top / bottom row: one row per row-height of push, like the pad */
+            if (s_grid_sy < y0) { s_grid_push_y += s_grid_sy - y0; s_grid_sy = y0; }
+            else if (s_grid_sy > y1) { s_grid_push_y += s_grid_sy - y1; s_grid_sy = y1; }
+            else s_grid_push_y = 0;
+            /* pushing past the right end of the squads (or the left end of the stock) turns the page */
+            if (s_grid_sx < 0) { s_grid_push_x += s_grid_sx; s_grid_sx = 0; }
+            else if (s_grid_sx > x1) { s_grid_push_x += s_grid_sx - x1; s_grid_sx = x1; }
+            else s_grid_push_x = 0;
+            int col = (int)floor(s_grid_sx / 42.0);
+            int row = top + (int)floor((s_grid_sy - y0) / g.pitch);
+            if (col > 6) col = 6;
+            if (s_grid_push_y <= -g.pitch && top > 0) { row = top - 1; s_grid_push_y = 0; }
+            else if (s_grid_push_y >= g.pitch && top + 3 < g.rows) { row = top + 3; s_grid_push_y = 0; }
             if (row < 0) row = 0;
             if (row > g.rows - 1) row = g.rows - 1;
-            /* past the first / last visible row: scroll one row */
-            if (row < top) { top = row; wr32(g.scroll_addr, (u32)(s32)(top * g.pitch)); }
-            if (row > top + 2) { top = row - 2; wr32(g.scroll_addr, (u32)(s32)(top * g.pitch)); }
-            /* keep the pointer inside the grid picture */
-            double y0 = cy, y1 = cy + 3 * g.pitch - 1;
-            if (s_grid_sy < y0) s_grid_sy = y0;
-            if (s_grid_sy > y1) s_grid_sy = y1;
-            if (s_grid_sx < 0) s_grid_sx = 0;
-            if (s_grid_sx > 7 * 42 - 1) s_grid_sx = 7 * 42 - 1;
+            if (row < top || row > top + 2) {             /* scroll one row */
+                int up = row < top;
+                if (g.scroll_addr == GRID_SCROLL) {       /* squads: the game's own smooth scroll */
+                    /* like the pad: first 4 px now, then 4 px a frame for 10 frames = one row */
+                    wr32(GRID_SCROLLV, (u32)(up ? -4 : 4)); wr32(GRID_SCROLLN, 11);
+                    wr32(GRID_SCROLL, (u32)((s32)scroll + (up ? -4 : 4)));
+                } else wr32(g.scroll_addr, (u32)(s32)((up ? top - 1 : top + 1) * g.pitch));
+            }
             u32 nx = (u32)(col * 42), ny = (u32)(s32)(row * g.pitch);
             if (nx != gx) wr32(GRID_X, nx);
             if (ny != gy) wr32(GRID_Y, ny);
             s_grid_wx = nx; s_grid_wy = ny;
+            int stock = g.scroll_addr != GRID_SCROLL;
+            if ((!stock && col == 6 && s_grid_push_x >= 42) || (stock && col == 0 && s_grid_push_x <= -42)) {
+                s_grid_push_x = 0; s_moved = 0;
+                start_pulse(stock ? B_LEFT : B_RIGHT);     /* the game slides to the other page */
+                return;
+            }
         }
         s_moved = 0;
         if (s_left) { s_left = 0; start_pulse(B_CIRCLE); s_cool = 20; return; }

@@ -22,7 +22,8 @@
  * camera box scrolls. Organize grids (squads / monster stock): the pointer picks the cell.
  * Scrolling lists, anywhere (main EXE func 80021EB8: attacks, magic, skills, items...): a hook on the
  * recompiled function gives the item count; the pointer walks the items, pushing past the first /
- * last visible row (or the wheel) scrolls, a click chooses.
+ * last visible row (or the wheel) scrolls, a click chooses. In the troop pickers Ctrl / Shift click
+ * or middle click is Square (mark a troop; the highlight stays under the pointer).
  * Everywhere else: left = Circle, right = Cross, middle = Triangle, wheel = Up/Down.
  *
  * The battle map is a tilted plane: hex (col,row) has world position (col, row - 0.5 for even
@@ -85,6 +86,7 @@ static const double KX = 3.260455542e+01, KZ = 3.198126134e+01;
 #define B_TRI    (1u << 12)
 #define B_CIRCLE (1u << 13)
 #define B_CROSS  (1u << 14)
+#define B_SQUARE (1u << 15)
 
 static double s_vx = -1, s_vy = -1;        /* pointer, display pixels (-1 = unknown) */
 static int s_moved;                        /* pointer moved since the last update */
@@ -95,6 +97,8 @@ static float s_px_per_pt = 1.0f;
 static u16 s_pulse_bits;                   /* button pulse in progress */
 static int s_pulse_frames, s_gap_frames;
 static int s_left, s_right, s_mid, s_wheel_up, s_wheel_down;   /* queued clicks */
+static int s_left_mod;                     /* the left click had Ctrl or Shift held */
+static int s_mark_row = -1, s_mark_wait;   /* troop list: row to keep highlighted after Square */
 
 static double s_acc_x, s_acc_y;            /* captured movement not applied yet, display pixels */
 static int s_abs;                          /* OS pointer moved (not captured): s_vx/s_vy is absolute */
@@ -313,7 +317,10 @@ int mouse_event(const SDL_Event *e) {
         return 0;
     case SDL_MOUSEBUTTONDOWN:
         if (!s_captured) { double dx, dy; pt_to_display(e->button.x, e->button.y, &dx, &dy); s_vx = dx; s_vy = dy; s_abs = 1; }
-        if (e->button.button == SDL_BUTTON_LEFT) s_left++;
+        if (e->button.button == SDL_BUTTON_LEFT) {
+            s_left++;
+            s_left_mod = (SDL_GetModState() & (KMOD_CTRL | KMOD_SHIFT)) != 0;
+        }
         else if (e->button.button == SDL_BUTTON_RIGHT) s_right++;
         else if (e->button.button == SDL_BUTTON_MIDDLE) s_mid++;
         return 1;
@@ -362,6 +369,11 @@ void mouse_update(void) {
     s_acc_x = s_acc_y = 0;
     int abs_move = s_abs; s_abs = 0;
     if (s_cool > 0) { s_cool--; s_moved = 0; mvx = mvy = 0; }
+    if (s_mark_wait > 0 && --s_mark_wait == 0 && s_mark_row >= 0) {
+        /* Square marked the row and the game moved its highlight down: keep it under the pointer */
+        if (list_active() && s_list_fixed && s_mark_row < s_list_count) list_select(s_mark_row);
+        s_mark_row = -1;
+    }
     if (s_pulse_frames > 0) { if (--s_pulse_frames == 0) s_pulse_bits = 0; s_moved = 0; return; }
     if (s_gap_frames > 0) { s_gap_frames--; s_moved = 0; return; }
 
@@ -390,7 +402,8 @@ void mouse_update(void) {
     }
 
     if (s_right) { s_right = 0; s_left = 0; start_pulse(B_CROSS); return; }
-    if (s_mid) { s_mid = 0; start_pulse(B_TRI); return; }
+    int troop = ctx == 4 && s_list_fixed;              /* troop picker: Square = mark */
+    if (s_mid && !troop) { s_mid = 0; start_pulse(B_TRI); return; }
 
     if (ctx == 1) {                                   /* battle map: free cursor / choosing a hex */
         u32 gx = rd32(RAM_CUR_WX), gz = rd32(RAM_CUR_WZ);
@@ -558,6 +571,16 @@ void mouse_update(void) {
             if (k != cur) list_select(k);
         }
         s_moved = 0;
+        if (troop && ((s_left && s_left_mod) || s_mid)) {   /* troop picker: Ctrl / Shift click or middle = Square */
+            int k = (s32)rd32(RAM_LIST_INDEX);
+            if (s_left && (abs_move || !s_captured)) {
+                int kk = s_vx >= 0 ? list_item_at(s_vx, s_vy) : -1;
+                if (kk >= 0) { k = kk; list_select(k); }
+            }
+            s_left = 0; s_mid = 0;
+            start_pulse(B_SQUARE); s_mark_row = k; s_mark_wait = 12;
+            return;
+        }
         if (s_left) {
             s_left = 0;
             int k = (s32)rd32(RAM_LIST_INDEX);

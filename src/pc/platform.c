@@ -182,7 +182,9 @@ static void present(int skipped) {
 static void inject_keys(void) {
     static int frame;
     const char *s = getenv("BRIG_KEYS");
+    static int mod_frames;
     frame++;
+    if (mod_frames > 0 && --mod_frames == 0) SDL_SetModState(KMOD_NONE);
     if (!s) return;
     while (*s) {
         int f = atoi(s);
@@ -197,9 +199,13 @@ static void inject_keys(void) {
             ev.type = SDL_MOUSEMOTION; ev.motion.xrel = atoi(name + 4);
             ev.motion.yrel = strchr(name, ';') ? atoi(strchr(name, ';') + 1) : 0;
             SDL_PushEvent(&ev);
-        } else if (f == frame && (!strncmp(name, "LClick", 6) || !strncmp(name, "RBtn", 4))) {   /* button only */
+        } else if (f == frame && (!strncmp(name, "LClick", 6) || !strncmp(name, "RBtn", 4) ||
+                                  !strncmp(name, "MBtn", 4) || !strncmp(name, "CClick", 6))) {
+            /* button only: LClick, RBtn, MBtn (middle), CClick (left with Ctrl held) */
             SDL_Event ev; memset(&ev, 0, sizeof ev);
-            ev.type = SDL_MOUSEBUTTONDOWN; ev.button.button = name[0] == 'R' ? SDL_BUTTON_RIGHT : SDL_BUTTON_LEFT;
+            if (name[0] == 'C') { SDL_SetModState(KMOD_LCTRL); mod_frames = 2; }
+            ev.type = SDL_MOUSEBUTTONDOWN;
+            ev.button.button = name[0] == 'R' ? SDL_BUTTON_RIGHT : name[0] == 'M' ? SDL_BUTTON_MIDDLE : SDL_BUTTON_LEFT;
             SDL_PushEvent(&ev);
         } else if (f == frame && (!strncmp(name, "Move=", 5) || !strncmp(name, "Click=", 6) || !strncmp(name, "RClick=", 7))) {
             /* scripted mouse (window points): Move=x;y, Click=x;y, RClick=x;y */

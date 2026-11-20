@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-Settings g_settings = { 30, 100, 50, 1, 0, 0, 0, 1, 1, 1, 25, 1, 1 };   /* BGM 30% matches the emulator balance (user-tested); movies 50% (user choice) */
+Settings g_settings = { 30, 100, 50, 1, 0, 0, 0, 1, 1, 1, 50, 1, 1 };   /* BGM 30% matches the emulator balance (user-tested); movies 50% (user choice) */
 extern float g_bgm_gain, g_sfx_gain, g_movie_gain;   /* audio.c */
 
 static char g_path[1024];

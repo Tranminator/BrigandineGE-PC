@@ -82,7 +82,9 @@ static int s_abs;                          /* OS pointer moved (not captured): s
 static int s_last_mode = -1, s_last_ctx = -1;
 static int s_confirm_wait, s_confirm_col, s_confirm_row, s_confirm_menu = -1;
 static double s_wx, s_wz;                  /* map pointer, world coordinates */
-static int s_map_valid, s_seen_col = -1, s_seen_row = -1, s_placed_col = -1, s_placed_row = -1;
+static int s_map_valid;
+static u32 s_wr_x, s_wr_z;                 /* world position last written (or seen) */
+static int s_cool;                         /* frames to ignore movement after a click */
 static double s_menu_y;                    /* menu pointer, display y */
 static int s_menu_valid;
 
@@ -111,9 +113,18 @@ int mouse_cursor_pos(float *x, float *y) {
     return 0;
 }
 
-static void place_cursor(int col, int row) {   /* instant; the game derives everything else */
-    wr32(RAM_CUR_WX, (u32)(col << 13));
-    wr32(RAM_CUR_WZ, (u32)((row << 13) + ((col & 1) ? 4096 : 0)));
+/* Map pointer <-> the game's cursor world position (8192 per hex). Our world z is the hex row
+ * minus 0.5 on even columns; the game stores z + 0.5. The game derives the current hex as
+ * col = (x + 4096) >> 13, row = (z [+ 4096 on even columns]) >> 13, and draws the highlight
+ * at the exact position, so writing a continuous position makes it glide. */
+static void write_world(double wx, double wz) {
+    s_wr_x = (u32)(s32)lround(wx * 8192.0);
+    s_wr_z = (u32)(s32)lround((wz + 0.5) * 8192.0);
+    wr32(RAM_CUR_WX, s_wr_x); wr32(RAM_CUR_WZ, s_wr_z);
+}
+static void game_hex(u32 gx, u32 gz, int *col, int *row) {
+    *col = ((s32)gx + 4096) >> 13;
+    *row = (*col & 1) ? ((s32)gz >> 13) : (((s32)gz + 4096) >> 13);
 }
 
 static void camera(double *cx, double *cz) { *cx = (s32)rd32(RAM_CAM_X) / KX; *cz = (s32)rd32(RAM_CAM_Z) / KZ; }
@@ -136,23 +147,6 @@ static void world_to_screen(double wx, double wz, double *sx, double *sy) {
     *sy = (H[1][0] * x + H[1][1] * z + H[1][2]) / w;
 }
 static void hex_center(int col, int row, double *wx, double *wz) { *wx = col; *wz = row - ((col % 2 == 0) ? 0.5 : 0.0); }
-static int world_to_hex(double wx, double wz, int *col, int *row) {
-    double best = 1e9; int bc = 0, br = 0;    /* nearest centre; x distances count 0.866 */
-    int c0 = (int)floor(wx + 0.5);
-    for (int cc = c0 - 1; cc <= c0 + 1; cc++) {
-        double off = (cc % 2 == 0) ? 0.5 : 0.0;
-        int rr = (int)floor(wz + off + 0.5);
-        for (int r2 = rr - 1; r2 <= rr + 1; r2++) {
-            double ddx = (wx - cc) * 0.866, ddz = wz - (r2 - off);
-            double dist = ddx * ddx + ddz * ddz;
-            if (dist < best) { best = dist; bc = cc; br = r2; }
-        }
-    }
-    if (bc < 0 || br < 0 || bc >= MAP_SIZE || br >= MAP_SIZE) return 0;
-    *col = bc; *row = br;
-    return 1;
-}
-
 static int menu_item_at(double x, double y) {   /* battle list menu item under the pointer, -1 none */
     if (x < MENU_X0 || x > MENU_X1 || y < MENU_Y0) return -1;
     int k = (int)floor((y - MENU_Y0) / MENU_DY);
@@ -221,8 +215,13 @@ static void warp_os_pointer(double dx, double dy) {
 void mouse_update(void) {
     update_capture();
     if (!g_settings.mouse) return;
-    if (s_pulse_frames > 0) { if (--s_pulse_frames == 0) s_pulse_bits = 0; return; }
-    if (s_gap_frames > 0) { s_gap_frames--; return; }
+    /* movement is taken every frame; whatever arrives while busy is dropped, never replayed later */
+    double mvx = s_acc_x, mvy = s_acc_y;
+    s_acc_x = s_acc_y = 0;
+    int abs_move = s_abs; s_abs = 0;
+    if (s_cool > 0) { s_cool--; s_moved = 0; mvx = mvy = 0; }
+    if (s_pulse_frames > 0) { if (--s_pulse_frames == 0) s_pulse_bits = 0; s_moved = 0; return; }
+    if (s_gap_frames > 0) { s_gap_frames--; s_moved = 0; return; }
 
     int battle = rd32(OVL_ID_ADDR) == 6 && rd32(RAM_SCREEN) == 2;
     int mode = battle ? (int)rd32(RAM_INPUT_MODE) : -1;
@@ -232,10 +231,6 @@ void mouse_update(void) {
         s_confirm_wait = 0; s_map_valid = 0; s_menu_valid = 0;
         s_last_ctx = ctx; s_last_mode = mode;
     }
-    double mvx = s_acc_x, mvy = s_acc_y;         /* captured movement this frame */
-    s_acc_x = s_acc_y = 0;
-    int abs_move = s_abs; s_abs = 0;
-
     /* a click placed something: confirm once the game has taken it */
     if (s_confirm_wait > 0) {
         if (--s_confirm_wait == 0) {
@@ -250,14 +245,15 @@ void mouse_update(void) {
     if (s_mid) { s_mid = 0; start_pulse(B_TRI); return; }
 
     if (ctx == 1) {                                   /* battle map: free cursor / choosing a hex */
-        int gc = rd8(RAM_CUR_COL), gr = rd8(RAM_CUR_ROW);
-        /* the game moved its cursor by itself (or we have no anchor yet): the pointer follows it */
-        if (!s_map_valid || ((gc != s_seen_col || gr != s_seen_row) && (gc != s_placed_col || gr != s_placed_row))) {
-            hex_center(gc, gr, &s_wx, &s_wz);
-            s_map_valid = 1; s_placed_col = gc; s_placed_row = gr;
+        u32 gx = rd32(RAM_CUR_WX), gz = rd32(RAM_CUR_WZ);
+        /* the game moved its cursor by itself (menu closed, keyboard / pad, unit moved) or we have no
+         * anchor yet: the pointer continues from the game's cursor, pending movement is dropped */
+        if (!s_map_valid || gx != s_wr_x || gz != s_wr_z) {
+            s_wx = (s32)gx / 8192.0; s_wz = (s32)gz / 8192.0 - 0.5;
+            s_wr_x = gx; s_wr_z = gz; s_map_valid = 1;
             double sx, sy; world_to_screen(s_wx, s_wz, &sx, &sy); warp_os_pointer(sx, sy);
+            s_moved = 0;
         }
-        s_seen_col = gc; s_seen_row = gr;
         if (s_moved) {
             double sx, sy;
             if (abs_move) { sx = s_vx; sy = s_vy; }
@@ -267,25 +263,25 @@ void mouse_update(void) {
             if (sx > disp_w() - 1) sx = disp_w() - 1;
             if (sy < 0) sy = 0;
             if (sy > PANEL_Y - 1) sy = PANEL_Y - 1;
-            double wx, wz; int col, row;
+            double wx, wz;
             if (screen_to_world(sx, sy, &wx, &wz)) {
-                if (wx < -0.4) wx = -0.4;
-                if (wz < -0.9) wz = -0.9;
-                if (wx > MAP_SIZE - 0.6) wx = MAP_SIZE - 0.6;
-                if (wz > MAP_SIZE - 0.6) wz = MAP_SIZE - 0.6;
+                if (wx < 0) wx = 0;
+                if (wz < 0) wz = 0;
+                if (wx > MAP_SIZE - 1) wx = MAP_SIZE - 1;
+                if (wz > MAP_SIZE - 1) wz = MAP_SIZE - 1;
                 s_wx = wx; s_wz = wz;
-                if (world_to_hex(wx, wz, &col, &row) && (col != gc || row != gr)) {
-                    place_cursor(col, row); s_placed_col = col; s_placed_row = row;
-                }
+                write_world(wx, wz);
             }
         }
         s_moved = 0;
-        if (s_left) {
+        if (s_left) {                                 /* select the highlighted hex: snap to its centre */
             s_left = 0;
-            int col, row;
-            if (world_to_hex(s_wx, s_wz, &col, &row)) {
-                if (col != gc || row != gr) { place_cursor(col, row); s_placed_col = col; s_placed_row = row; }
+            int col, row; game_hex(s_wr_x, s_wr_z, &col, &row);
+            if (col >= 0 && row >= 0 && col < MAP_SIZE && row < MAP_SIZE) {
+                hex_center(col, row, &s_wx, &s_wz);
+                write_world(s_wx, s_wz);
                 s_confirm_col = col; s_confirm_row = row; s_confirm_menu = -1; s_confirm_wait = 2;
+                s_cool = 20;
             }
             return;
         }
@@ -309,7 +305,7 @@ void mouse_update(void) {
                 if (kk < 0) { start_pulse(B_CROSS); return; }
                 k = kk; wr32(RAM_MENU_INDEX, (u32)k);
             }
-            s_confirm_menu = k; s_confirm_wait = 2;
+            s_confirm_menu = k; s_confirm_wait = 2; s_cool = 20;
             return;
         }
     } else {                                          /* anywhere else: buttons */

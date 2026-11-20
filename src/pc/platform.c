@@ -192,7 +192,16 @@ static void inject_keys(void) {
         const char *p = colon + 1;
         while (*p && *p != ',' && n < 31) name[n++] = *p++;
         name[n] = 0;
-        if (f == frame && (!strncmp(name, "Move=", 5) || !strncmp(name, "Click=", 6) || !strncmp(name, "RClick=", 7))) {
+        if (f == frame && !strncmp(name, "Rel=", 4)) {   /* scripted relative mouse motion (points) */
+            SDL_Event ev; memset(&ev, 0, sizeof ev);
+            ev.type = SDL_MOUSEMOTION; ev.motion.xrel = atoi(name + 4);
+            ev.motion.yrel = strchr(name, ';') ? atoi(strchr(name, ';') + 1) : 0;
+            SDL_PushEvent(&ev);
+        } else if (f == frame && (!strncmp(name, "LClick", 6) || !strncmp(name, "RBtn", 4))) {   /* button only */
+            SDL_Event ev; memset(&ev, 0, sizeof ev);
+            ev.type = SDL_MOUSEBUTTONDOWN; ev.button.button = name[0] == 'R' ? SDL_BUTTON_RIGHT : SDL_BUTTON_LEFT;
+            SDL_PushEvent(&ev);
+        } else if (f == frame && (!strncmp(name, "Move=", 5) || !strncmp(name, "Click=", 6) || !strncmp(name, "RClick=", 7))) {
             /* scripted mouse (window points): Move=x;y, Click=x;y, RClick=x;y */
             const char *xy = strchr(name, '=') + 1;
             int mx = atoi(xy), my = strchr(xy, ';') ? atoi(strchr(xy, ';') + 1) : 0;

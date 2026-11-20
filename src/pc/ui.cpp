@@ -203,13 +203,13 @@ static void tab_controls(void) {
     bool cap = g_settings.mouse_capture != 0;
     if (ImGui::Checkbox("Game pointer (captures the mouse)", &cap)) g_settings.mouse_capture = cap;
     ImGui::BeginDisabled(!cap);
-    ImGui::SliderInt("Pointer speed", &g_settings.mouse_speed, 10, 200, "%d%%");
+    ImGui::SliderInt("Pointer speed", &g_settings.mouse_speed, 5, 100, "%d%%");
     ImGui::EndDisabled();
     ImGui::EndDisabled();
-    hint("Battle map: point at a hex to highlight it, click to select; hold the pointer at a screen edge to "
-         "scroll. Battle menus: point and click an item, click outside to close. Elsewhere: left click = Circle, "
-         "right click = Cross, wheel = Up / Down, middle click = Triangle. The game pointer is released while "
-         "this window is open or the game is in the background.");
+    hint("The mouse drives the game's own cursor (one pointer). Battle map: move to a hex, click to select, push "
+         "against a screen edge to scroll. Battle menus: move up / down, click to choose. Right click = Cross "
+         "(back), middle click = Triangle, wheel = Up / Down. The mouse is released while this window is open or "
+         "the game is in the background.");
     ImGui::Spacing();
     if (ImGui::BeginTable("keys", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {
         ImGui::TableSetupColumn("PS1"); ImGui::TableSetupColumn("Keyboard"); ImGui::TableSetupColumn("Controller");

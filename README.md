@@ -53,9 +53,12 @@ cmake -S . -B build/cmake && cmake --build build/cmake -j8
 | L2 / R2 | 1 / 3 | LT / RT |
 | Start / Select | Enter / Backspace | Start / Back |
 
-Mouse (can be turned off in `F2` → **Controls**): on the battle map the hex under the mouse is highlighted
-instantly and a click selects it (units, move / attack targets — the game still checks every choice);
-elsewhere left click = ○, right click = ×, wheel = up/down, middle click = △.
+Mouse (`F2` → **Controls**): the game captures the mouse and draws its own pointer with an adjustable speed
+(a high-DPI mouse stays usable on the 320×240 picture; released while `F2` is open or the window is in the
+background — or switch to the OS pointer). Battle map: the hex under the pointer is highlighted instantly, a
+click selects it (units, move targets — the game still checks every choice), holding the pointer at a screen
+edge scrolls. Battle command / system menus: point and click an item, click outside to close. Elsewhere:
+left click = ○, right click = ×, wheel = up/down, middle click = △.
 
 `F5` quick save, `F9` quick load (see below). `F1` shows all of VRAM (debug). Hold `Tab` to fast-forward.
 
@@ -79,7 +82,7 @@ Debug env vars: `BRIG_TRACE=1` (per-second GPU stats), `BRIG_SHOT_DIR=<dir> BRIG
 (BMP snapshots), `BRIG_INPUT="frame:hexmask,..."` (scripted pad input), `BRIG_SHOW_VRAM=1`,
 `BRIG_CDTRACE=1` (CD commands), `BRIG_SNDTRACE=1` (libsnd calls + active SPU voices), `BRIG_WAV=<file.wav>`
 (record audio output), `BRIG_MUTE_XA=1` (SPU only), `BRIG_REVERB_ONLY=1` (reverb wet signal only), `BRIG_MUTE_SPU=1` (XA only), `BRIG_KEYS="frame:KeyName,..."` (scripted keyboard keys), `BRIG_FAST=1` (unthrottled), `BRIG_SKIP_MOVIES=1`,
-`BRIG_SHOT_FROM`/`BRIG_SHOT_TO` (snapshot range), `BRIG_SLOW_MS=<n>` (simulate a slow machine), `BRIG_UI_TAB=<0-4>`, `BRIG_STATE_DIR=<dir>` (save-slot folder, for tests), `BRIG_SHADER=<name>`, `BRIG_SHADER_CFG=<file>`, `BRIG_SCALE=<1-8>` (internal resolution). `F10` (hardware renderer only) writes renderer diagnostics to
+`BRIG_SHOT_FROM`/`BRIG_SHOT_TO` (snapshot range), `BRIG_SLOW_MS=<n>` (simulate a slow machine), `BRIG_UI_TAB=<0-4>`, `BRIG_STATE_DIR=<dir>` (save-slot folder, for tests), `BRIG_SHADER=<name>`, `BRIG_SHADER_CFG=<file>`, `BRIG_SCALE=<1-8>` (internal resolution), `BRIG_NO_CAPTURE=1` (OS pointer, for scripted mouse tests), `BRIG_POKE="frame:addr=value"` (write RAM). `F10` (hardware renderer only) writes renderer diagnostics to
 `<pref>/debug/` (scaled vs software VRAM images) and `states/debug.state` (`BRIG_DEBUG_DIR` overrides the folder).
 
 ## Renderer (internal resolution)

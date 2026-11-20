@@ -6,6 +6,7 @@
 #include "imgui_impl_opengl3.h"
 #include "video_gl.h"
 #include "gpu_hw.h"
+#include "mouse.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -198,8 +199,17 @@ static void tab_controls(void) {
     };
     bool m = g_settings.mouse != 0;
     if (ImGui::Checkbox("Mouse control", &m)) g_settings.mouse = m;
-    hint("Battle map: point at a hex to move the cursor there, click to select it. Everywhere: left click = "
-         "Circle, right click = Cross, wheel = Up / Down, middle click = Triangle.");
+    ImGui::BeginDisabled(!m);
+    bool cap = g_settings.mouse_capture != 0;
+    if (ImGui::Checkbox("Game pointer (captures the mouse)", &cap)) g_settings.mouse_capture = cap;
+    ImGui::BeginDisabled(!cap);
+    ImGui::SliderInt("Pointer speed", &g_settings.mouse_speed, 10, 200, "%d%%");
+    ImGui::EndDisabled();
+    ImGui::EndDisabled();
+    hint("Battle map: point at a hex to highlight it, click to select; hold the pointer at a screen edge to "
+         "scroll. Battle menus: point and click an item, click outside to close. Elsewhere: left click = Circle, "
+         "right click = Cross, wheel = Up / Down, middle click = Triangle. The game pointer is released while "
+         "this window is open or the game is in the background.");
     ImGui::Spacing();
     if (ImGui::BeginTable("keys", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {
         ImGui::TableSetupColumn("PS1"); ImGui::TableSetupColumn("Keyboard"); ImGui::TableSetupColumn("Controller");
@@ -334,6 +344,16 @@ static void tab_save(void) {
     ImGui::EndChild();
 }
 
+/* the game pointer (mouse captured): a small arrow with an outline */
+static void cursor_overlay(float x, float y) {
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
+    const float s = 1.0f;
+    ImVec2 p[7] = { { x, y }, { x, y + 17 * s }, { x + 4.5f * s, y + 13 * s }, { x + 7.5f * s, y + 19.5f * s },
+                    { x + 10 * s, y + 18.5f * s }, { x + 7 * s, y + 12 * s }, { x + 12.5f * s, y + 12 * s } };
+    dl->AddConcavePolyFilled(p, 7, IM_COL32(255, 255, 255, 255));
+    dl->AddPolyline(p, 7, IM_COL32(0, 0, 0, 255), ImDrawFlags_Closed, 1.5f);
+}
+
 static void perf_overlay(void) {
     ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_Always);
     ImGui::SetNextWindowBgAlpha(0.55f);
@@ -349,12 +369,15 @@ static void perf_overlay(void) {
 
 extern "C" void ui_frame(void) {
     bool toast = s_toast[0] && SDL_GetTicks() <= s_toast_until;
-    if (!s_ready || (!s_open && !g_settings.show_perf && !toast)) return;
+    float cx, cy;
+    bool cursor = mouse_cursor_pos(&cx, &cy) != 0;
+    if (!s_ready || (!s_open && !g_settings.show_perf && !toast && !cursor)) return;
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplSDL2_NewFrame();
     ImGui::NewFrame();
     if (g_settings.show_perf) perf_overlay();
     toast_overlay();
+    if (cursor) cursor_overlay(cx, cy);
     if (s_open) {
         ImGuiIO &io = ImGui::GetIO();
         ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));

@@ -262,10 +262,30 @@ static void poke_ram(void) {
     }
 }
 
+/* debug: BRIG_RAMDUMP="frame,frame,..." writes the 2 MB of PS1 RAM to <BRIG_DEBUG_DIR or .>/ram_<frame>.bin */
+static void dump_ram(void) {
+    static int frame;
+    const char *s = getenv("BRIG_RAMDUMP");
+    frame++;
+    if (!s) return;
+    for (const char *p = s; *p; ) {
+        if (atoi(p) == frame) {
+            const char *dir = getenv("BRIG_DEBUG_DIR");
+            char path[1024]; snprintf(path, sizeof path, "%s/ram_%05d.bin", dir ? dir : ".", frame);
+            FILE *f = fopen(path, "wb");
+            if (f) { fwrite(g_ram, 1, RAM_SIZE, f); fclose(f); }
+        }
+        const char *comma = strchr(p, ',');
+        if (!comma) break;
+        p = comma + 1;
+    }
+}
+
 void platform_vblank(void) {
     SDL_Event e;
     inject_keys();
     poke_ram();
+    dump_ram();
     while (SDL_PollEvent(&e)) {
         if (e.type == SDL_QUIT) g_quit = 1;
         if (ui_event(&e)) continue;                   /* settings UI (F2) consumed it */

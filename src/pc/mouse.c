@@ -13,8 +13,12 @@
  *     (by writing its world position; the game derives hex, unit panel, highlight and camera
  *     itself). A click selects the hex; the game still validates every choice. Pushing the
  *     pointer against a screen edge scrolls: the game's camera follows its cursor.
+ *     Attack / spell targets ("Target Who?") use the same hex cursor.
  *   - command menu / system menu (the game's generic list menu): moving the mouse up / down
  *     changes the item, a click chooses it, right click closes the menu.
+ * Scrolling lists, anywhere (main EXE func 80021EB8: attacks, magic, skills, items...): a hook on the
+ * recompiled function gives the item count; the pointer walks the items, pushing past the first /
+ * last visible row (or the wheel) scrolls, a click chooses.
  * Everywhere else: left = Circle, right = Cross, middle = Triangle, wheel = Up/Down.
  *
  * The battle map is a tilted plane: hex (col,row) has world position (col, row - 0.5 for even
@@ -51,6 +55,15 @@
 #define MENU_Y0 19.5                  /* top of item 0 */
 #define MENU_DY 19.2                  /* item pitch */
 #define PANEL_Y 198.0                 /* the unit / terrain panel starts here (not map) */
+/* generic scrolling list (main EXE func 80021EB8: magic, skills, attacks, items...), $gp-relative */
+#define RAM_LIST_TOP    0x800A6820u   /* first visible item */
+#define RAM_LIST_WIN    0x800A6824u   /* window handle: window table 0x800ACE28 + 18 * handle (x, y, w, h s16) */
+#define RAM_LIST_INDEX  0x800A6834u   /* selected item */
+#define RAM_LIST_STATE  0x800A6854u   /* 2 = taking input */
+#define RAM_LIST_REDRAW 0x800A6860u   /* 2 = item texts must be redrawn (scrolled) */
+#define RAM_LIST_VIS    0x800A6864u   /* visible rows */
+#define WIN_TABLE       0x800ACE28u
+#define LIST_ROW        16.0          /* row pitch; row 0 starts 7 px below the window top, 8 px in */
 
 /* screen = H * (world - camera), camera = (camX / KX, camZ / KZ) */
 static const double H[3][3] = {
@@ -87,6 +100,45 @@ static u32 s_wr_x, s_wr_z;                 /* world position last written (or se
 static int s_cool;                         /* frames to ignore movement after a click */
 static double s_menu_y;                    /* menu pointer, display y */
 static int s_menu_valid;
+static u32 s_confirm_addr;                 /* menu index variable the pending click is checked against */
+static unsigned s_frame;                   /* mouse_update calls */
+static unsigned s_list_seen;               /* frame the game last ran its list menu */
+static int s_list_count;                   /* items in that list */
+static double s_list_pos;                  /* list pointer, in items (index + fraction) */
+static int s_list_valid, s_list_wr = -1;
+
+/* the game runs its scrolling list menu this frame (hook from the recompiled function; see
+ * hook_list.txt): a0 = item count, a1 = visible rows, a2 = disabled flags, a3 = x, then w, centre y */
+void hook_f_main_80021EB8(Ctx *c) {
+    s_list_count = (s32)c->r[4];
+    s_list_seen = s_frame;
+}
+static int list_active(void) {
+    return s_frame - s_list_seen <= 2 && s_list_count > 0 && (s32)rd32(RAM_LIST_STATE) == 2;
+}
+static void list_window(double *x, double *y, double *w) {
+    u32 e = WIN_TABLE + 18 * rd32(RAM_LIST_WIN);
+    *x = (s16)rd16(e); *y = (s16)rd16(e + 2); *w = (s16)rd16(e + 4);
+}
+/* list item under a display position, -1 none */
+static int list_item_at(double px, double py) {
+    double x, y, w; list_window(&x, &y, &w);
+    int top = (s32)rd32(RAM_LIST_TOP), vis = (s32)rd32(RAM_LIST_VIS);
+    if (px < x + 8 || px >= x + w - 8 || py < y + 7) return -1;
+    int k = (int)floor((py - y - 7) / LIST_ROW);
+    return k >= 0 && k < vis && top + k < s_list_count ? top + k : -1;
+}
+/* select item k, scrolling it into view */
+static void list_select(int k) {
+    if (k < 0) k = 0;
+    if (k > s_list_count - 1) k = s_list_count - 1;
+    int top = (s32)rd32(RAM_LIST_TOP), vis = (s32)rd32(RAM_LIST_VIS), nt = top;
+    if (k < nt) nt = k;
+    if (k > nt + vis - 1) nt = k - vis + 1;
+    if (nt != top) { wr32(RAM_LIST_TOP, (u32)nt); wr32(RAM_LIST_REDRAW, 2); }
+    if ((s32)rd32(RAM_LIST_INDEX) != k) wr32(RAM_LIST_INDEX, (u32)k);
+    s_list_wr = k;
+}
 
 void mouse_set_view(int x, int y, int w, int h, float px_per_pt) {
     s_view_x = x; s_view_y = y; s_view_w = w; s_view_h = h; s_px_per_pt = px_per_pt > 0 ? px_per_pt : 1.0f;
@@ -215,6 +267,7 @@ static void warp_os_pointer(double dx, double dy) {
 void mouse_update(void) {
     update_capture();
     if (!g_settings.mouse) return;
+    s_frame++;
     /* movement is taken every frame; whatever arrives while busy is dropped, never replayed later */
     double mvx = s_acc_x, mvy = s_acc_y;
     s_acc_x = s_acc_y = 0;
@@ -226,15 +279,15 @@ void mouse_update(void) {
     int battle = rd32(OVL_ID_ADDR) == 6 && rd32(RAM_SCREEN) == 2;
     int mode = battle ? (int)rd32(RAM_INPUT_MODE) : -1;
     int menu = battle && mode == 1 && rd32(RAM_MENU_TYPE) <= 1 && (s32)rd32(RAM_MENU_LAST) >= 0;
-    int ctx = !battle ? 0 : menu ? 2 : (mode == 0 || mode == 2) ? 1 : 3;
+    int ctx = list_active() ? 4 : !battle ? 0 : menu ? 2 : (mode == 0 || mode == 2) && rd8(RAM_CUR_COL) != 0xFF ? 1 : 3;   /* 0xFF: cursor hidden */
     if (ctx != s_last_ctx || mode != s_last_mode) {   /* screen / mode changed: re-anchor the pointer */
-        s_confirm_wait = 0; s_map_valid = 0; s_menu_valid = 0;
+        s_confirm_wait = 0; s_map_valid = 0; s_menu_valid = 0; s_list_valid = 0;
         s_last_ctx = ctx; s_last_mode = mode;
     }
     /* a click placed something: confirm once the game has taken it */
     if (s_confirm_wait > 0) {
         if (--s_confirm_wait == 0) {
-            if (s_confirm_menu >= 0) { if ((s32)rd32(RAM_MENU_INDEX) == s_confirm_menu) start_pulse(B_CIRCLE); }
+            if (s_confirm_menu >= 0) { if ((s32)rd32(s_confirm_addr) == s_confirm_menu) start_pulse(B_CIRCLE); }
             else if (rd8(RAM_CUR_COL) == s_confirm_col && rd8(RAM_CUR_ROW) == s_confirm_row) start_pulse(B_CIRCLE);
         }
         s_left = 0; s_moved = 0;
@@ -305,9 +358,42 @@ void mouse_update(void) {
                 if (kk < 0) { start_pulse(B_CROSS); return; }
                 k = kk; wr32(RAM_MENU_INDEX, (u32)k);
             }
-            s_confirm_menu = k; s_confirm_wait = 2; s_cool = 20;
+            s_confirm_menu = k; s_confirm_addr = RAM_MENU_INDEX; s_confirm_wait = 2; s_cool = 20;
             return;
         }
+    } else if (ctx == 4) {                            /* scrolling list: the pointer walks the items */
+        int cur = (s32)rd32(RAM_LIST_INDEX);
+        if (!s_list_valid || cur != s_list_wr) {      /* new list, or the game / keyboard moved it */
+            s_list_pos = cur + 0.5; s_list_wr = cur; s_list_valid = 1;
+        }
+        if (s_wheel_up || s_wheel_down) {             /* wheel: one item per notch */
+            s_list_pos += s_wheel_down - s_wheel_up; s_wheel_up = s_wheel_down = 0;
+            s_moved = 1; abs_move = 0; mvy = 0;
+        }
+        if (s_moved) {
+            if (abs_move) {
+                int k = list_item_at(s_vx, s_vy);
+                if (k >= 0) s_list_pos = k + 0.5;
+            } else s_list_pos += mvy / LIST_ROW;
+            /* pushing past the first / last visible row scrolls the list */
+            if (s_list_pos < 0.01) s_list_pos = 0.01;
+            if (s_list_pos > s_list_count - 0.01) s_list_pos = s_list_count - 0.01;
+            int k = (int)floor(s_list_pos);
+            if (k != cur) list_select(k);
+        }
+        s_moved = 0;
+        if (s_left) {
+            s_left = 0;
+            int k = (s32)rd32(RAM_LIST_INDEX);
+            if (abs_move || !s_captured) {            /* OS pointer: the item under it, or close when outside */
+                int kk = s_vx >= 0 ? list_item_at(s_vx, s_vy) : -1;
+                if (kk < 0) { start_pulse(B_CROSS); return; }
+                k = kk; list_select(k);
+            }
+            s_confirm_menu = k; s_confirm_addr = RAM_LIST_INDEX; s_confirm_wait = 2; s_cool = 20;
+            return;
+        }
+        return;
     } else {                                          /* anywhere else: buttons */
         s_moved = 0;
         if (s_left) { s_left = 0; start_pulse(B_CIRCLE); return; }

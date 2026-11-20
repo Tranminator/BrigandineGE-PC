@@ -1,0 +1,3 @@
+# Recompiled functions that call hook_f_main_<addr>(Ctx *c) on entry (main EXE only).
+# The hook can read the arguments; the original function still runs.
+0x80021EB8   # generic scrolling list menu (magic, skills, attacks, items...): mouse.c

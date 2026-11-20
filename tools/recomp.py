@@ -385,6 +385,8 @@ class FuncGen:
             out += ["    }"]
         else:
             out = [f"/* {name} */", f"void {fn}(Ctx *c) {{"]
+            if self.start in self.ctx.get("hooks", ()):
+                out.append(f"    hook_{fn}(c);   /* src/pc/hook_list.txt */")
         a = self.start
         while a < self.end:
             w = seg.word(a)
@@ -497,6 +499,10 @@ def main():
     hle_path = os.path.join(ROOT, "src/pc/hle_list.txt")
     if os.path.exists(hle_path):
         hle_names = {l.split("#")[0].strip() for l in open(hle_path)} - {""}
+    hooks = set()   # functions that call hook_<name>(c) on entry (args readable, nothing replaced)
+    hook_path = os.path.join(ROOT, "src/pc/hook_list.txt")
+    if os.path.exists(hook_path):
+        hooks = {int(l.split("#")[0].strip(), 16) for l in open(hook_path) if l.split("#")[0].strip()}
     main_seg = segs[0]
     hle_by_addr = {a: n for a, n in main_seg.names.items() if n in hle_names}
     starts = {}
@@ -513,7 +519,7 @@ def main():
                     st.add(t)
         starts[s.sid] = st
     ctx = {"main": main_seg, "hle_by_addr": hle_by_addr, "starts": starts,
-           "data_ptrs": data_pointers(segs)}
+           "data_ptrs": data_pointers(segs), "hooks": hooks}
     os.makedirs(OUT, exist_ok=True)
     protos, tables = [], []
     stats = {}
@@ -591,6 +597,8 @@ def main():
         f.write('#pragma once\n#include "rt.h"\n' + "\n".join(protos) + "\n")
         for n in sorted(hle_names):
             f.write(f"void hle_{n}(Ctx *c);\n")
+        for a in sorted(hooks):
+            f.write(f"void hook_f_main_{a:08X}(Ctx *c);\n")
     with open(os.path.join(OUT, "recomp_tables.c"), "w") as f:
         f.write('#include "recomp_funcs.h"\n')
         for sid, tab in tables:

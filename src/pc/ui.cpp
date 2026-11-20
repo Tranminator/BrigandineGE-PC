@@ -207,7 +207,8 @@ static void tab_controls(void) {
     ImGui::EndDisabled();
     ImGui::EndDisabled();
     hint("The mouse drives the game's own cursor (one pointer). Battle map: move to a hex, click to select, push "
-         "against a screen edge to scroll. Battle menus: move up / down, click to choose. Right click = Cross "
+         "against a screen edge to scroll; attack / spell targets the same way. Menus and lists (attacks, magic, "
+         "skills...): move up / down, click to choose, push past the end or use the wheel to scroll. Right click = Cross "
          "(back), middle click = Triangle, wheel = Up / Down. The mouse is released while this window is open or "
          "the game is in the background.");
     ImGui::Spacing();

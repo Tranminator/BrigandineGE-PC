@@ -24,7 +24,7 @@ set(GEN_DIR ${CMAKE_SOURCE_DIR}/build/gen)
 add_custom_command(
   OUTPUT ${GEN_DIR}/recomp_tables.c
   COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/recomp.py ${CMAKE_SOURCE_DIR}
-  DEPENDS ${CMAKE_SOURCE_DIR}/tools/recomp.py ${CMAKE_SOURCE_DIR}/src/pc/hle_list.txt
+  DEPENDS ${CMAKE_SOURCE_DIR}/tools/recomp.py ${CMAKE_SOURCE_DIR}/src/pc/hle_list.txt ${CMAKE_SOURCE_DIR}/src/pc/hook_list.txt
   COMMENT "Recompiling PS1 code")
 
 file(GLOB GEN_SRC ${GEN_DIR}/recomp_*.c)

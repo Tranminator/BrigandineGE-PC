@@ -207,7 +207,7 @@ static void tab_controls(void) {
     ImGui::EndDisabled();
     ImGui::EndDisabled();
     hint("The mouse drives the game's own cursor (one pointer). Battle map: move to a hex, click to select, push "
-         "against a screen edge to scroll; attack / spell targets the same way. Strategy map: the quill follows the "
+         "against a screen edge to scroll (keeps scrolling at the game's Cursor Speed until you move back); attack / spell targets the same way. Strategy map: the quill follows the "
          "mouse, click a castle; in troop lists Ctrl / Shift / middle click marks a troop. Menus, Organize grids and lists (attacks, magic, "
          "skills, SUMMON...): move up / down, click to choose, push past the end or use the wheel to scroll. Yes / No "
          "boxes: move left / right, click to answer. Unit status: point at an attack / spell / skill to read it. Right click = Cross "

@@ -56,9 +56,10 @@ cmake -S . -B build/cmake && cmake --build build/cmake -j8
 Mouse (`F2` → **Controls**): one pointer — the mouse drives the game's own cursor (captured, with an
 adjustable speed so a high-DPI mouse stays usable on the 320×240 picture; released while `F2` is open or the
 window is in the background). Battle map: move to a hex, click to select (the game still checks every
-choice), push against a screen edge to scroll; when the game moves its cursor itself (menu closed, keyboard,
+choice), push against a screen edge to scroll (it keeps scrolling at
+the game's cursor speed until you move the mouse back); when the game moves its cursor itself (menu closed, keyboard,
 pad) the mouse continues from there; attack / spell targets are picked the same way. Strategy map: the
-quill follows the mouse (push past the edge to scroll), click a castle to open its menu. Icon menus
+quill follows the mouse (push past the edge to scroll, same as on the battle map), click a castle to open its menu. Icon menus
 (battle commands, castle, Organize), the Organize squad / stock grids and the scrolling lists (attacks,
 magic, skills, items, SUMMON monsters, UNITS knights...): point, click to choose, push past the last row or use the wheel to
 scroll. Yes / No boxes: point at Yes or No (or wheel), click to answer. Unit status: point at an attack,

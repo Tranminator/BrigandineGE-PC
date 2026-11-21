@@ -12,14 +12,16 @@
  *   - free cursor / choosing a hex: the game's cursor is placed on the hex under the pointer
  *     (by writing its world position; the game derives hex, unit panel, highlight and camera
  *     itself). A click selects the hex; the game still validates every choice. Pushing the
- *     pointer against a screen edge scrolls: the game's camera follows its cursor.
+ *     pointer against a screen edge scrolls: the game's camera follows its cursor. A push that reaches
+ *     the camera's follow box holds that D-pad direction (game speed) until the mouse moves back.
  *     Attack / spell targets ("Target Who?") use the same hex cursor.
  *   - command menu / system menu (the game's generic list menu): moving the mouse up / down
  *     changes the item, a click chooses it, right click closes the menu.
  * Icon menus, anywhere (battle commands, castle menu, Organize menu...): item boxes come from the
  * game's own item position table.
  * Strategy map: the quill follows the pointer (see smap_*), a click is Circle; pushing past the
- * camera box scrolls. Organize grids (squads / monster stock): the pointer picks the cell.
+ * camera box scrolls, and keeps scrolling at the game's speed (D-pad held) until the mouse moves back.
+ * Organize grids (squads / monster stock): the pointer picks the cell.
  * Scrolling lists, anywhere (main EXE func 80021EB8: attacks, magic, skills, items...): a hook on the
  * recompiled function gives the item count; the pointer walks the items, pushing past the first /
  * last visible row (or the wheel) scrolls, a click chooses. The SUMMON monster list works the same way.
@@ -69,6 +71,10 @@
 #define CASTLE_TABLE    0x80096760u   /* 28 bytes per castle: x, y (u16, world >> 8) at +4 / +6 */
 #define RAM_CASTLE_EXTRA 0x800DACD8u  /* bit 5: a 42nd castle exists */
 #define PANEL_Y 198.0                 /* the unit / terrain panel starts here (not map) */
+#define BM_FOLLOW_X0 54.0              /* the battle camera follows its cursor out of this box (screen) */
+#define BM_FOLLOW_X1 266.0
+#define BM_FOLLOW_Y0 83.0
+#define BM_FOLLOW_Y1 135.0
 /* generic scrolling list (main EXE func 80021EB8: magic, skills, attacks, items...), $gp-relative */
 #define RAM_LIST_TOP    0x800A6820u   /* first visible item */
 #define RAM_LIST_WIN    0x800A6824u   /* window handle: window table 0x800ACE28 + 18 * handle (x, y, w, h s16) */
@@ -107,6 +113,7 @@ static float s_px_per_pt = 1.0f;
 
 static u16 s_pulse_bits;                   /* button pulse in progress */
 static int s_pulse_frames, s_gap_frames;
+static u16 s_edge_bits;                    /* maps: pointer held against an edge = D-pad held (the game scrolls) */
 static int s_left, s_right, s_mid, s_wheel_up, s_wheel_down;   /* queued clicks */
 static int s_side;                         /* side (back / forward) button: Start */
 static double s_hpush;                     /* unit list: horizontal push towards the next / previous page */
@@ -494,6 +501,22 @@ void mouse_cancel(void) { s_confirm_wait = 0; }
 static void start_pulse_n(u16 bits, int frames) { s_pulse_bits = bits; s_pulse_frames = frames; s_gap_frames = 2; }
 static void start_pulse(u16 bits) { start_pulse_n(bits, 6); }
 
+/* maps: pushing the pointer outwards against an edge holds that D-pad direction, so the game moves its
+ * cursor and camera at its own speed (Cursor Speed option) for as long as the pointer stays there;
+ * moving the other way lets go */
+static void edge_release(double mvx, double mvy) {
+    if (mvx < -0.5) s_edge_bits &= ~B_RIGHT;
+    if (mvx > 0.5) s_edge_bits &= ~B_LEFT;
+    if (mvy < -0.5) s_edge_bits &= ~B_DOWN;
+    if (mvy > 0.5) s_edge_bits &= ~B_UP;
+}
+static void edge_push(int l, int r, int u, int d, double mvx, double mvy, double min) {
+    if (l && mvx < -min) s_edge_bits |= B_LEFT;
+    if (r && mvx > min) s_edge_bits |= B_RIGHT;
+    if (u && mvy < -min) s_edge_bits |= B_UP;
+    if (d && mvy > min) s_edge_bits |= B_DOWN;
+}
+
 /* pointer capture follows focus and the settings window */
 static void update_capture(void) {
     if (getenv("BRIG_FAKE_CAPTURE")) { s_captured = 1; return; }   /* tests: behave as captured */
@@ -541,6 +564,9 @@ void mouse_update(void) {
     int ctx = yn_active() ? 7 : sp_active() ? 8 : dom_active() ? 9 : list_active() ? 4 : grid_active() ? 6 : menu ? 2 : smap ? 5
             : battle && (mode == 0 || mode == 2) && rd8(RAM_CUR_COL) != 0xFF ? 1 : battle ? 3 : 0;   /* 0xFF: cursor hidden */
     if (!battle && !smap && ctx != 2 && ctx != 4 && ctx != 7 && ctx != 8 && ctx != 9) mode = ctx == 6 ? 100 + (int)(rd32(GRID_MODE) != 0) : -1;
+    /* edge hold: maps with the captured pointer only; a click, the OS pointer or another screen lets go */
+    if (!((ctx == 1 || ctx == 5) && s_captured && !abs_move) || s_left || s_right || s_mid) s_edge_bits = 0;
+    else edge_release(mvx, mvy);
     if (ctx != s_last_ctx || mode != s_last_mode) {   /* screen / mode changed: re-anchor the pointer */
         s_confirm_wait = 0; s_map_valid = 0; s_menu_valid = 0; s_list_valid = 0; s_grid_valid = 0; s_yn_valid = 0; s_sp_valid = 0; s_dom_valid = 0;
         if (getenv("BRIG_MOUSE_TRACE")) rt_log("[mouse] frame %u ctx %d mode %d", s_frame, ctx, mode);
@@ -577,6 +603,8 @@ void mouse_update(void) {
             if (abs_move) { sx = s_vx; sy = s_vy; }
             else { world_to_screen(s_wx, s_wz, &sx, &sy); sx += mvx; sy += mvy; }
             /* stay on the map picture; pushing against an edge lets the camera follow */
+            /* the camera keeps the cursor within x 52..268, y 81..137: a push (not a drift) past that holds */
+            if (!abs_move) edge_push(sx < BM_FOLLOW_X0, sx > BM_FOLLOW_X1, sy < BM_FOLLOW_Y0, sy > BM_FOLLOW_Y1, mvx, mvy, 3.0);
             if (sx < 0) sx = 0;
             if (sx > disp_w() - 1) sx = disp_w() - 1;
             if (sy < 0) sy = 0;
@@ -643,6 +671,8 @@ void mouse_update(void) {
             smap_to_world(sx, sy, &wx, &wz);
             /* a little past the camera box: the game's camera follows, so pushing on scrolls */
             double cu, cv; smap_cam(&cu, &cv);
+            if (!abs_move) edge_push(wx <= cu - SMAP_U - 0.4, wx >= cu + SMAP_U + 0.4,
+                                     wz <= cv + SMAP_V0 - 0.3, wz >= cv + SMAP_V1 + 0.3, mvx, mvy, 0.5);
             if (wx < cu - SMAP_U - 0.4) wx = cu - SMAP_U - 0.4;
             if (wx > cu + SMAP_U + 0.4) wx = cu + SMAP_U + 0.4;
             if (wz < cv + SMAP_V0 - 0.3) wz = cv + SMAP_V0 - 0.3;
@@ -894,4 +924,4 @@ void mouse_update(void) {
     else if (s_wheel_down) { s_wheel_down--; start_pulse(B_DOWN); }
 }
 
-u16 mouse_pad_bits(void) { return s_pulse_bits; }
+u16 mouse_pad_bits(void) { return s_pulse_bits | s_edge_bits; }

@@ -2,3 +2,5 @@
 # "0x<addr>" = main EXE, "ov<N>:0x<addr>" = overlay. Used by mouse.c.
 0x80021EB8       # generic scrolling list menu (magic, skills, attacks, items...)
 ov1:0x800CDB1C   # strategy: Organize squad grid / stock input (CLASS, EQUIP, ...)
+ov1:0x800D09A0   # strategy: SUMMON monster list (state machine, runs every frame)
+0x800219B4       # Yes / No box (state gp+2096, choice gp+2196)

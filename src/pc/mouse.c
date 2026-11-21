@@ -22,7 +22,8 @@
  * camera box scrolls. Organize grids (squads / monster stock): the pointer picks the cell.
  * Scrolling lists, anywhere (main EXE func 80021EB8: attacks, magic, skills, items...): a hook on the
  * recompiled function gives the item count; the pointer walks the items, pushing past the first /
- * last visible row (or the wheel) scrolls, a click chooses. In the troop pickers Ctrl / Shift click
+ * last visible row (or the wheel) scrolls, a click chooses. The SUMMON monster list works the same way.
+ * Yes / No boxes (main func 800219B4): the pointer's x picks the answer. In the troop pickers Ctrl / Shift click
  * or middle click is Square (mark a troop; the game then moves to the next row, as with the pad).
  * Everywhere else: left = Circle, right = Cross, middle = Triangle, wheel = Up/Down.
  *
@@ -155,43 +156,83 @@ static GridLayout grid_layout(void) {
     if (g.rows < 1) g.rows = 1;
     return g;
 }
-/* The strategy troop pickers (main func 80022C84: MOVE / QUEST "Select Troop"...) share the list's
- * variables and window but have their own loop: no hook, no scrolling, all rows shown, so the item
- * count comes from the window height (rows * 16 + 14). */
-static int s_list_fixed;
-static void list_window(double *x, double *y, double *w) {
-    u32 e = WIN_TABLE + 18 * rd32(RAM_LIST_WIN);
-    *x = (s16)rd16(e); *y = (s16)rd16(e + 2); *w = (s16)rd16(e + 4);
+/* Lists the pointer walks: the generic list above, the strategy troop pickers (main func 80022C84:
+ * MOVE / QUEST "Select Troop"...; they share the list's variables and window but have their own
+ * loop: no hook, no scrolling, all rows shown, so the item count comes from the window height,
+ * rows * 16 + 14), and the SUMMON monster list (strategy overlay func 800D09A0, state 0 = choosing:
+ * 3 boxes of 47 px, scrolled by the game's own top variable). */
+#define RAM_SUMMON_STATE 0x800A6910u  /* 0 = choosing a monster */
+#define RAM_SUMMON_INDEX 0x800A6948u
+#define RAM_SUMMON_COUNT 0x800DC8A4u
+#define RAM_SUMMON_TOP   0x800DC8A8u
+static unsigned s_summon_seen;
+void hook_f_ov1_800D09A0(Ctx *c) { (void)c; s_summon_seen = s_frame; }
+/* Yes / No box (main func 800219B4, args x, y, w, h): "Yes" left of the box centre, "No" right */
+#define RAM_YN_STATE 0x800A67F8u      /* 2 = taking input */
+#define RAM_YN_WIN   0x800A6804u      /* window handle */
+#define RAM_YN_INDEX 0x800A685Cu      /* 0 Yes, 1 No */
+static unsigned s_yn_seen;
+static double s_yn_x;                 /* pointer x */
+static int s_yn_valid, s_yn_wr = -1;
+void hook_f_main_800219B4(Ctx *c) { (void)c; s_yn_seen = s_frame; }
+static int yn_active(void) { return s_frame - s_yn_seen <= 2 && rd32(RAM_YN_STATE) == 2; }
+static void yn_box(double *x, double *y, double *w, double *h) {
+    u32 e = WIN_TABLE + 18 * rd32(RAM_YN_WIN);
+    *x = (s16)rd16(e); *y = (s16)rd16(e + 2); *w = (s16)rd16(e + 4); *h = (s16)rd16(e + 6);
 }
+typedef struct {
+    u32 idx, top, redraw;        /* index / first visible row variables (top 0 = never scrolls) */
+    int count, vis;              /* items, visible rows */
+    double x, y, w, pitch;       /* first row's box, row pitch */
+    int kind;                    /* 1 generic, 2 troop picker, 3 summon */
+} ListDesc;
+static ListDesc s_ld;
+static int s_list_fixed;         /* troop picker */
 static int list_active(void) {
+    ListDesc *L = &s_ld;
+    s_list_fixed = 0;
+    if (rd32(OVL_ID_ADDR) == 5 && s_frame - s_summon_seen <= 2 && rd32(RAM_SUMMON_STATE) == 0) {
+        int n = (s32)rd32(RAM_SUMMON_COUNT);
+        if (n < 1) return 0;
+        L->idx = RAM_SUMMON_INDEX; L->top = RAM_SUMMON_TOP; L->redraw = 0;
+        L->count = n; L->vis = 3; L->x = 8; L->y = 64; L->w = 170; L->pitch = 47; L->kind = 3;
+        return 1;
+    }
     if ((s32)rd32(RAM_LIST_STATE) != 2) return 0;
-    if (s_frame - s_list_seen <= 2 && s_list_count > 0) { s_list_fixed = 0; return 1; }
-    if (rd32(OVL_ID_ADDR) != 5) return 0;
     u32 e = WIN_TABLE + 18 * rd32(RAM_LIST_WIN);
-    int h = (s16)rd16(e + 6), n = (int)lround((h - 14) / LIST_ROW);
+    double wx = (s16)rd16(e), wy = (s16)rd16(e + 2), ww = (s16)rd16(e + 4), wh = (s16)rd16(e + 6);
+    L->idx = RAM_LIST_INDEX; L->x = wx + 8; L->y = wy + 7; L->w = ww - 16; L->pitch = LIST_ROW;
+    if (s_frame - s_list_seen <= 2 && s_list_count > 0) {
+        L->top = RAM_LIST_TOP; L->redraw = RAM_LIST_REDRAW;
+        L->count = s_list_count; L->vis = (s32)rd32(RAM_LIST_VIS); L->kind = 1;
+        return 1;
+    }
+    if (rd32(OVL_ID_ADDR) != 5) return 0;
+    int n = (int)lround((wh - 14) / LIST_ROW);
     if (n < 1 || n > 16) return 0;
-    s_list_fixed = 1; s_list_count = n;
+    L->top = 0; L->redraw = 0; L->count = n; L->vis = n; L->kind = 2;
+    s_list_fixed = 1;
     return 1;
 }
-static int list_top(void) { return s_list_fixed ? 0 : (s32)rd32(RAM_LIST_TOP); }
-static int list_vis(void) { return s_list_fixed ? s_list_count : (s32)rd32(RAM_LIST_VIS); }
+static int list_top(void) { return s_ld.top ? (s32)rd32(s_ld.top) : 0; }
 /* list item under a display position, -1 none */
 static int list_item_at(double px, double py) {
-    double x, y, w; list_window(&x, &y, &w);
-    int top = list_top(), vis = list_vis();
-    if (px < x + 8 || px >= x + w - 8 || py < y + 7) return -1;
-    int k = (int)floor((py - y - 7) / LIST_ROW);
-    return k >= 0 && k < vis && top + k < s_list_count ? top + k : -1;
+    const ListDesc *L = &s_ld;
+    int top = list_top();
+    if (px < L->x || px >= L->x + L->w || py < L->y) return -1;
+    int k = (int)floor((py - L->y) / L->pitch);
+    return k >= 0 && k < L->vis && top + k < L->count ? top + k : -1;
 }
 /* select item k, scrolling it into view */
 static void list_select(int k) {
+    const ListDesc *L = &s_ld;
     if (k < 0) k = 0;
-    if (k > s_list_count - 1) k = s_list_count - 1;
-    int top = list_top(), vis = list_vis(), nt = top;
+    if (k > L->count - 1) k = L->count - 1;
+    int top = list_top(), nt = top;
     if (k < nt) nt = k;
-    if (k > nt + vis - 1) nt = k - vis + 1;
-    if (nt != top) { wr32(RAM_LIST_TOP, (u32)nt); wr32(RAM_LIST_REDRAW, 2); }
-    if ((s32)rd32(RAM_LIST_INDEX) != k) wr32(RAM_LIST_INDEX, (u32)k);
+    if (k > nt + L->vis - 1) nt = k - L->vis + 1;
+    if (nt != top && L->top) { wr32(L->top, (u32)nt); if (L->redraw) wr32(L->redraw, 2); }
+    if ((s32)rd32(L->idx) != k) wr32(L->idx, (u32)k);
     s_list_wr = k;
 }
 
@@ -393,13 +434,16 @@ void mouse_update(void) {
     int mode = (int)rd32(RAM_INPUT_MODE);
     u32 flags = rd32(RAM_UI_FLAGS);
     /* icon menu taking input (its state stays 2 after it closes; the cursor flag tells) */
-    int menu = (s32)rd32(RAM_MENU_LAST) >= 0 && rd32(RAM_MENU_STATE) == 2 && !(flags & 1);
+    /* ...and not covered by a sub-screen of its own (SUMMON) */
+    int sub = ovl == 5 && s_frame - s_summon_seen <= 2;
+    int menu = (s32)rd32(RAM_MENU_LAST) >= 0 && rd32(RAM_MENU_STATE) == 2 && !(flags & 1) && !sub;
     int smap = ovl == 5 && (flags & 0x9) == 0x9;
-    int ctx = list_active() ? 4 : grid_active() ? 6 : menu ? 2 : smap ? 5
+    int ctx = yn_active() ? 7 : list_active() ? 4 : grid_active() ? 6 : menu ? 2 : smap ? 5
             : battle && (mode == 0 || mode == 2) && rd8(RAM_CUR_COL) != 0xFF ? 1 : battle ? 3 : 0;   /* 0xFF: cursor hidden */
-    if (!battle && !smap && ctx != 2 && ctx != 4) mode = ctx == 6 ? 100 + (int)(rd32(GRID_MODE) != 0) : -1;
+    if (!battle && !smap && ctx != 2 && ctx != 4 && ctx != 7) mode = ctx == 6 ? 100 + (int)(rd32(GRID_MODE) != 0) : -1;
     if (ctx != s_last_ctx || mode != s_last_mode) {   /* screen / mode changed: re-anchor the pointer */
-        s_confirm_wait = 0; s_map_valid = 0; s_menu_valid = 0; s_list_valid = 0; s_grid_valid = 0;
+        s_confirm_wait = 0; s_map_valid = 0; s_menu_valid = 0; s_list_valid = 0; s_grid_valid = 0; s_yn_valid = 0;
+        if (getenv("BRIG_MOUSE_TRACE")) rt_log("[mouse] frame %u ctx %d mode %d", s_frame, ctx, mode);
         s_last_ctx = ctx; s_last_mode = mode;
     }
     /* a click placed something: confirm once the game has taken it */
@@ -562,8 +606,37 @@ void mouse_update(void) {
         }
         s_moved = 0;
         if (s_left) { s_left = 0; start_pulse(B_CIRCLE); s_cool = 20; return; }
+    } else if (ctx == 7) {                            /* Yes / No: the pointer's x picks */
+        double bx, by, bw, bh; yn_box(&bx, &by, &bw, &bh);
+        double cx = bx + bw / 2;
+        int cur = (s32)rd32(RAM_YN_INDEX);
+        if (!s_yn_valid || cur != s_yn_wr) { s_yn_x = cur ? cx + 28 : cx - 32; s_yn_wr = cur; s_yn_valid = 1; }
+        if (s_wheel_up || s_wheel_down) {             /* wheel: up = Yes, down = No */
+            s_yn_x = s_wheel_down > s_wheel_up ? cx + 28 : cx - 32; s_wheel_up = s_wheel_down = 0;
+            s_moved = 1; abs_move = 0; mvx = 0;
+        }
+        if (s_moved) {
+            s_yn_x = abs_move ? s_vx : s_yn_x + mvx;
+            if (s_yn_x < bx + 8) s_yn_x = bx + 8;
+            if (s_yn_x > bx + bw - 8) s_yn_x = bx + bw - 8;
+            int k = s_yn_x >= cx;
+            if (k != cur) wr32(RAM_YN_INDEX, (u32)k);
+            s_yn_wr = k;
+        }
+        s_moved = 0;
+        if (s_left) {
+            s_left = 0;
+            int k = (s32)rd32(RAM_YN_INDEX);
+            if (abs_move || !s_captured) {            /* OS pointer: outside the box = cancel */
+                if (s_vx < bx || s_vx >= bx + bw || s_vy < by || s_vy >= by + bh) { start_pulse(B_CROSS); return; }
+                k = s_vx >= cx; wr32(RAM_YN_INDEX, (u32)k);
+            }
+            s_confirm_menu = k; s_confirm_addr = RAM_YN_INDEX; s_confirm_wait = 2; s_cool = 20;
+            return;
+        }
+        return;
     } else if (ctx == 4) {                            /* scrolling list: the pointer walks the items */
-        int cur = (s32)rd32(RAM_LIST_INDEX);
+        int cur = (s32)rd32(s_ld.idx);
         if (!s_list_valid || cur != s_list_wr) {      /* new list, or the game / keyboard moved it */
             s_list_pos = cur + 0.5; s_list_wr = cur; s_list_valid = 1;
         }
@@ -575,16 +648,16 @@ void mouse_update(void) {
             if (abs_move) {
                 int k = list_item_at(s_vx, s_vy);
                 if (k >= 0) s_list_pos = k + 0.5;
-            } else s_list_pos += mvy / LIST_ROW;
+            } else s_list_pos += mvy / s_ld.pitch;
             /* pushing past the first / last visible row scrolls the list */
             if (s_list_pos < 0.01) s_list_pos = 0.01;
-            if (s_list_pos > s_list_count - 0.01) s_list_pos = s_list_count - 0.01;
+            if (s_list_pos > s_ld.count - 0.01) s_list_pos = s_ld.count - 0.01;
             int k = (int)floor(s_list_pos);
             if (k != cur) list_select(k);
         }
         s_moved = 0;
         if (troop && ((s_left && s_left_mod) || s_mid)) {   /* troop picker: Ctrl / Shift click or middle = Square */
-            int k = (s32)rd32(RAM_LIST_INDEX);
+            int k = (s32)rd32(s_ld.idx);
             if (s_left && (abs_move || !s_captured)) {
                 int kk = s_vx >= 0 ? list_item_at(s_vx, s_vy) : -1;
                 if (kk >= 0) { k = kk; list_select(k); }
@@ -595,13 +668,13 @@ void mouse_update(void) {
         }
         if (s_left) {
             s_left = 0;
-            int k = (s32)rd32(RAM_LIST_INDEX);
+            int k = (s32)rd32(s_ld.idx);
             if (abs_move || !s_captured) {            /* OS pointer: the item under it, or close when outside */
                 int kk = s_vx >= 0 ? list_item_at(s_vx, s_vy) : -1;
                 if (kk < 0) { start_pulse(B_CROSS); return; }
                 k = kk; list_select(k);
             }
-            s_confirm_menu = k; s_confirm_addr = RAM_LIST_INDEX; s_confirm_wait = 2; s_cool = 20;
+            s_confirm_menu = k; s_confirm_addr = s_ld.idx; s_confirm_wait = 2; s_cool = 20;
             return;
         }
         return;

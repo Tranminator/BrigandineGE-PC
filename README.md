@@ -60,7 +60,8 @@ choice), push against a screen edge to scroll; when the game moves its cursor it
 pad) the mouse continues from there; attack / spell targets are picked the same way. Strategy map: the
 quill follows the mouse (push past the edge to scroll), click a castle to open its menu. Icon menus
 (battle commands, castle, Organize), the Organize squad / stock grids and the scrolling lists (attacks,
-magic, skills, items...): point, click to choose, push past the last row or use the wheel to scroll.
+magic, skills, items, SUMMON monsters...): point, click to choose, push past the last row or use the wheel to
+scroll. Yes / No boxes: point at Yes or No (or wheel), click to answer.
 In the MOVE / QUEST troop lists, Ctrl+click, Shift+click or middle click marks a troop (□ Select). Right click = × (back), middle click = △, wheel =
 up/down; on other screens left click = ○.
 

@@ -385,8 +385,8 @@ class FuncGen:
             out += ["    }"]
         else:
             out = [f"/* {name} */", f"void {fn}(Ctx *c) {{"]
-            if (seg.sid, self.start) in self.ctx.get("hooks", ()):
-                out.append(f"    hook_{fn}(c);   /* src/pc/hook_list.txt */")
+        if (seg.sid, self.start) in self.ctx.get("hooks", ()):   # primary entry only
+            out.append(f"    hook_{fn}(c);   /* src/pc/hook_list.txt */")
         a = self.start
         while a < self.end:
             w = seg.word(a)

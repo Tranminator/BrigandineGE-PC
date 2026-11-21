@@ -210,7 +210,7 @@ static void tab_controls(void) {
          "against a screen edge to scroll; attack / spell targets the same way. Strategy map: the quill follows the "
          "mouse, click a castle; in troop lists Ctrl / Shift / middle click marks a troop. Menus, Organize grids and lists (attacks, magic, "
          "skills, SUMMON...): move up / down, click to choose, push past the end or use the wheel to scroll. Yes / No "
-         "boxes: move left / right, click to answer. Right click = Cross "
+         "boxes: move left / right, click to answer. Unit status: point at an attack / spell / skill to read it. Right click = Cross "
          "(back), middle click = Triangle, wheel = Up / Down. The mouse is released while this window is open or "
          "the game is in the background.");
     ImGui::Spacing();

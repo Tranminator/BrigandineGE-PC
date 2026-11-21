@@ -61,7 +61,8 @@ pad) the mouse continues from there; attack / spell targets are picked the same 
 quill follows the mouse (push past the edge to scroll), click a castle to open its menu. Icon menus
 (battle commands, castle, Organize), the Organize squad / stock grids and the scrolling lists (attacks,
 magic, skills, items, SUMMON monsters...): point, click to choose, push past the last row or use the wheel to
-scroll. Yes / No boxes: point at Yes or No (or wheel), click to answer.
+scroll. Yes / No boxes: point at Yes or No (or wheel), click to answer. Unit status: point at an attack,
+spell or skill to read its description, click for the next page.
 In the MOVE / QUEST troop lists, Ctrl+click, Shift+click or middle click marks a troop (□ Select). Right click = × (back), middle click = △, wheel =
 up/down; on other screens left click = ○.
 

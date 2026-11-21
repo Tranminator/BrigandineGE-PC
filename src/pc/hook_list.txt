@@ -4,3 +4,5 @@
 ov1:0x800CDB1C   # strategy: Organize squad grid / stock input (CLASS, EQUIP, ...)
 ov1:0x800D09A0   # strategy: SUMMON monster list (state machine, runs every frame)
 0x800219B4       # Yes / No box (state gp+2096, choice gp+2196)
+0x8002B940       # icon menu input (castle / Start / Organize / battle commands)
+0x8002F840       # unit status page 2 (attacks / magic / skills), per frame

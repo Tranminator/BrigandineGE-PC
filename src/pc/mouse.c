@@ -23,7 +23,9 @@
  * Scrolling lists, anywhere (main EXE func 80021EB8: attacks, magic, skills, items...): a hook on the
  * recompiled function gives the item count; the pointer walks the items, pushing past the first /
  * last visible row (or the wheel) scrolls, a click chooses. The SUMMON monster list works the same way.
- * Yes / No boxes (main func 800219B4): the pointer's x picks the answer. In the troop pickers Ctrl / Shift click
+ * Yes / No boxes (main func 800219B4): the pointer's x picks the answer. Unit status page 2 (main func
+ * 8002F840): the pointer picks the attack / spell / skill described. Icon menus count only while the game
+ * runs their input (main func 8002B940): their state outlives them, under SUMMON, STATUS... In the troop pickers Ctrl / Shift click
  * or middle click is Square (mark a troop; the game then moves to the next row, as with the pad).
  * Everywhere else: left = Circle, right = Cross, middle = Triangle, wheel = Up/Down.
  *
@@ -115,7 +117,7 @@ static double s_menu_y;                    /* menu pointer, display y */
 static int s_menu_valid;
 static u32 s_confirm_addr;                 /* menu index variable the pending click is checked against */
 static unsigned s_frame;                   /* mouse_update calls */
-static unsigned s_list_seen;               /* frame the game last ran its list menu */
+static unsigned s_list_seen = 0x80000000u;               /* frame the game last ran its list menu */
 static int s_list_count;                   /* items in that list */
 static double s_list_pos;                  /* list pointer, in items (index + fraction) */
 static int s_list_valid, s_list_wr = -1;
@@ -138,7 +140,7 @@ void hook_f_main_80021EB8(Ctx *c) {
 #define GRID_SCROLLV 0x800DC688u   /* squads: scroll animation speed, 0 = still */
 #define GRID_SCROLLN 0x800DC84Cu   /* squads: scroll animation frames left */
 #define RAM_KNIGHTS  0x800A690Cu   /* knights in the castle = squad rows */
-static unsigned s_grid_seen;
+static unsigned s_grid_seen = 0x80000000u;
 static double s_grid_sx, s_grid_sy;        /* grid pointer, display pixels */
 static int s_grid_valid;
 static double s_grid_push_x, s_grid_push_y;   /* pointer pushed past the grid edge */
@@ -165,16 +167,44 @@ static GridLayout grid_layout(void) {
 #define RAM_SUMMON_INDEX 0x800A6948u
 #define RAM_SUMMON_COUNT 0x800DC8A4u
 #define RAM_SUMMON_TOP   0x800DC8A8u
-static unsigned s_summon_seen;
+static unsigned s_summon_seen = 0x80000000u;
+static unsigned s_menu_seen = 0x80000000u;                /* frame the game last ran its icon menu input (main 8002B940) */
+void hook_f_main_8002B940(Ctx *c) { (void)c; s_menu_seen = s_frame; }
 void hook_f_ov1_800D09A0(Ctx *c) { (void)c; s_summon_seen = s_frame; }
 /* Yes / No box (main func 800219B4, args x, y, w, h): "Yes" left of the box centre, "No" right */
 #define RAM_YN_STATE 0x800A67F8u      /* 2 = taking input */
 #define RAM_YN_WIN   0x800A6804u      /* window handle */
 #define RAM_YN_INDEX 0x800A685Cu      /* 0 Yes, 1 No */
-static unsigned s_yn_seen;
+static unsigned s_yn_seen = 0x80000000u;
 static double s_yn_x;                 /* pointer x */
 static int s_yn_valid, s_yn_wr = -1;
 void hook_f_main_800219B4(Ctx *c) { (void)c; s_yn_seen = s_frame; }
+/* Unit status, page 2 (main func 8002F840): three lists, ATTACK (x 14, all rows), MAGIC (x 168, 8 rows,
+ * scrolls) and SKILL (x 14, y 159, 3 rows, scrolls); rows 16 px from y 79, 138 px wide. The selected
+ * one is only described (no action), so the pointer just picks what is described. */
+#define RAM_SP_SECT   0x800A6944u     /* 0 attack, 1 magic, 2 skill */
+#define RAM_SP_INDEX  0x800A6948u
+#define RAM_SP_NATK   0x800A6908u
+#define RAM_SP_NMAG   0x800A69D4u
+#define RAM_SP_MAGTOP 0x800A69D8u
+#define RAM_SP_NSKL   0x800A69E4u
+#define RAM_SP_SKLTOP 0x800A69E8u
+#define RAM_FADE      0x800A67BCu     /* bit 3: screen fading, no input */
+static unsigned s_sp_seen = 0x80000000u;
+static double s_sp_x, s_sp_y, s_sp_push;
+static int s_sp_valid;
+static u32 s_sp_wr = 0xFFFFFFFF;
+void hook_f_main_8002F840(Ctx *c) { (void)c; s_sp_seen = s_frame; }
+static int sp_active(void) { return s_frame - s_sp_seen <= 2 && !(rd32(RAM_FADE) & 8); }
+typedef struct { double x, y; int n, vis; u32 top; } SpSect;
+static SpSect sp_sect(int k) {
+    SpSect t;
+    if (k == 0) { t.x = 14; t.y = 79; t.n = (s32)rd32(RAM_SP_NATK); t.vis = t.n; t.top = 0; }
+    else if (k == 1) { t.x = 168; t.y = 79; t.n = (s32)rd32(RAM_SP_NMAG); t.vis = 8; t.top = RAM_SP_MAGTOP; }
+    else { t.x = 14; t.y = 159; t.n = (s32)rd32(RAM_SP_NSKL); t.vis = 3; t.top = RAM_SP_SKLTOP; }
+    if (t.vis > t.n) t.vis = t.n;
+    return t;
+}
 static int yn_active(void) { return s_frame - s_yn_seen <= 2 && rd32(RAM_YN_STATE) == 2; }
 static void yn_box(double *x, double *y, double *w, double *h) {
     u32 e = WIN_TABLE + 18 * rd32(RAM_YN_WIN);
@@ -433,16 +463,15 @@ void mouse_update(void) {
     int battle = ovl == 6 && rd32(RAM_SCREEN) == 2;
     int mode = (int)rd32(RAM_INPUT_MODE);
     u32 flags = rd32(RAM_UI_FLAGS);
-    /* icon menu taking input (its state stays 2 after it closes; the cursor flag tells) */
-    /* ...and not covered by a sub-screen of its own (SUMMON) */
-    int sub = ovl == 5 && s_frame - s_summon_seen <= 2;
-    int menu = (s32)rd32(RAM_MENU_LAST) >= 0 && rd32(RAM_MENU_STATE) == 2 && !(flags & 1) && !sub;
+    /* icon menu taking input: its state stays 2 after it closes and under the screens it opens
+     * (SUMMON, STATUS...), so the game must also have run its menu input (hook) just now */
+    int menu = (s32)rd32(RAM_MENU_LAST) >= 0 && rd32(RAM_MENU_STATE) == 2 && !(flags & 1) && s_frame - s_menu_seen <= 2;
     int smap = ovl == 5 && (flags & 0x9) == 0x9;
-    int ctx = yn_active() ? 7 : list_active() ? 4 : grid_active() ? 6 : menu ? 2 : smap ? 5
+    int ctx = yn_active() ? 7 : sp_active() ? 8 : list_active() ? 4 : grid_active() ? 6 : menu ? 2 : smap ? 5
             : battle && (mode == 0 || mode == 2) && rd8(RAM_CUR_COL) != 0xFF ? 1 : battle ? 3 : 0;   /* 0xFF: cursor hidden */
-    if (!battle && !smap && ctx != 2 && ctx != 4 && ctx != 7) mode = ctx == 6 ? 100 + (int)(rd32(GRID_MODE) != 0) : -1;
+    if (!battle && !smap && ctx != 2 && ctx != 4 && ctx != 7 && ctx != 8) mode = ctx == 6 ? 100 + (int)(rd32(GRID_MODE) != 0) : -1;
     if (ctx != s_last_ctx || mode != s_last_mode) {   /* screen / mode changed: re-anchor the pointer */
-        s_confirm_wait = 0; s_map_valid = 0; s_menu_valid = 0; s_list_valid = 0; s_grid_valid = 0; s_yn_valid = 0;
+        s_confirm_wait = 0; s_map_valid = 0; s_menu_valid = 0; s_list_valid = 0; s_grid_valid = 0; s_yn_valid = 0; s_sp_valid = 0;
         if (getenv("BRIG_MOUSE_TRACE")) rt_log("[mouse] frame %u ctx %d mode %d", s_frame, ctx, mode);
         s_last_ctx = ctx; s_last_mode = mode;
     }
@@ -635,6 +664,47 @@ void mouse_update(void) {
             return;
         }
         return;
+    } else if (ctx == 8) {                            /* unit status page 2: the pointer picks the item described */
+        int sect = (s32)rd32(RAM_SP_SECT), idx = (s32)rd32(RAM_SP_INDEX);
+        u32 key = (u32)(sect << 16 | (idx & 0xFFFF));
+        if (!s_sp_valid || key != s_sp_wr) {          /* new page, or the pad moved it: start on the selection */
+            SpSect t = sp_sect(sect);
+            s_sp_x = t.x + 40; s_sp_y = t.y + 16 * (idx - (t.top ? (s32)rd32(t.top) : 0)) + 8;
+            s_sp_wr = key; s_sp_valid = 1; s_sp_push = 0;
+        }
+        if (s_moved) {
+            if (abs_move) { s_sp_x = s_vx; s_sp_y = s_vy; }
+            else { s_sp_x += mvx; s_sp_y += mvy; }
+            if (s_sp_x < 14) s_sp_x = 14;
+            if (s_sp_x > 305) s_sp_x = 305;
+            for (int k = 0; k < 3; k++) {
+                SpSect t = sp_sect(k);
+                if (t.n <= 0 || s_sp_x < t.x || s_sp_x >= t.x + 138) continue;
+                int top = t.top ? (s32)rd32(t.top) : 0;
+                double y1 = t.y + 16 * t.vis;
+                if (s_sp_y < t.y - 8 || s_sp_y >= y1 + 8) continue;
+                /* captured: pushing past the first / last visible row scrolls, one row per 16 px */
+                if (!abs_move && t.top && s_sp_y >= y1 && top + t.vis < t.n) {
+                    s_sp_push += s_sp_y - (y1 - 1); s_sp_y = y1 - 1;
+                    if (s_sp_push >= 16) { s_sp_push = 0; wr32(t.top, (u32)++top); }
+                } else if (!abs_move && t.top && s_sp_y < t.y && top > 0) {
+                    s_sp_push += s_sp_y - t.y; s_sp_y = t.y;
+                    if (s_sp_push <= -16) { s_sp_push = 0; wr32(t.top, (u32)--top); }
+                } else s_sp_push = 0;
+                int r = (int)floor((s_sp_y - t.y) / 16);
+                if (r < 0 || r >= t.vis) break;
+                if (k != sect) wr32(RAM_SP_SECT, (u32)k);
+                if (top + r != idx) wr32(RAM_SP_INDEX, (u32)(top + r));
+                s_sp_wr = (u32)(k << 16 | ((top + r) & 0xFFFF));
+                break;
+            }
+            if (!abs_move) {                          /* captured: stay within the lists */
+                if (s_sp_y < 79) s_sp_y = 79;
+                if (s_sp_y > 206) s_sp_y = 206;
+            }
+        }
+        s_moved = 0;
+        if (s_left) { s_left = 0; start_pulse(B_CIRCLE); s_cool = 20; return; }
     } else if (ctx == 4) {                            /* scrolling list: the pointer walks the items */
         int cur = (s32)rd32(s_ld.idx);
         if (!s_list_valid || cur != s_list_wr) {      /* new list, or the game / keyboard moved it */

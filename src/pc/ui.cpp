@@ -212,7 +212,7 @@ static void tab_controls(void) {
          "skills, SUMMON...): move up / down, click to choose, push past the end or use the wheel to scroll. Yes / No "
          "boxes: move left / right, click to answer. Unit status: point at an attack / spell / skill to read it. Right click = Cross "
          "(back), middle click = Triangle, wheel = Up / Down. Start = right click on a map (free cursor) or a side button. "
-         "DOMAIN: the box follows the mouse, click to jump there. SAVE / LOAD: point at a file, click. The mouse is released while this window is open or "
+         "DOMAIN: the box follows the mouse, click to jump there. SAVE / LOAD: point at a file, click. UNITS: push sideways for other columns; a tilt wheel is Left / Right. The mouse is released while this window is open or "
          "the game is in the background.");
     ImGui::Spacing();
     if (ImGui::BeginTable("keys", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {

@@ -109,7 +109,6 @@ static u16 s_pulse_bits;                   /* button pulse in progress */
 static int s_pulse_frames, s_gap_frames;
 static int s_left, s_right, s_mid, s_wheel_up, s_wheel_down;   /* queued clicks */
 static int s_side;                         /* side (back / forward) button: Start */
-static int s_wheel_left, s_wheel_right;    /* tilt wheel: Left / Right */
 static double s_hpush;                     /* unit list: horizontal push towards the next / previous page */
 static int s_left_mod;                     /* the left click had Ctrl or Shift held */
 
@@ -485,8 +484,6 @@ int mouse_event(const SDL_Event *e) {
     case SDL_MOUSEWHEEL:
         if (e->wheel.y > 0) s_wheel_up++;
         else if (e->wheel.y < 0) s_wheel_down++;
-        if (e->wheel.x > 0) s_wheel_right++;
-        else if (e->wheel.x < 0) s_wheel_left++;
         return 1;
     }
     return 0;
@@ -812,8 +809,7 @@ void mouse_update(void) {
         int cur = list_cur();
         if (s_ld.kind == 4) {                         /* unit list: Left / Right show other columns */
             int dir = 0;
-            if (s_wheel_left || s_wheel_right) { dir = s_wheel_right > s_wheel_left ? 1 : -1; s_wheel_left = s_wheel_right = 0; }
-            else if (s_moved && !abs_move && fabs(mvx) > fabs(mvy)) {
+            if (s_moved && !abs_move && fabs(mvx) > fabs(mvy)) {
                 s_hpush += mvx;                       /* a deliberate sideways push, not a wobble */
                 if (fabs(s_hpush) >= 64) dir = s_hpush > 0 ? 1 : -1;
             } else if (s_moved && fabs(mvy) > fabs(mvx)) s_hpush = 0;
@@ -896,8 +892,6 @@ void mouse_update(void) {
     }
     if (s_wheel_up) { s_wheel_up--; start_pulse(B_UP); }
     else if (s_wheel_down) { s_wheel_down--; start_pulse(B_DOWN); }
-    else if (s_wheel_left) { s_wheel_left--; start_pulse(B_LEFT); }
-    else if (s_wheel_right) { s_wheel_right--; start_pulse(B_RIGHT); }
 }
 
 u16 mouse_pad_bits(void) { return s_pulse_bits; }

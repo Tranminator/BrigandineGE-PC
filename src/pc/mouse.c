@@ -23,7 +23,7 @@
  * Scrolling lists, anywhere (main EXE func 80021EB8: attacks, magic, skills, items...): a hook on the
  * recompiled function gives the item count; the pointer walks the items, pushing past the first /
  * last visible row (or the wheel) scrolls, a click chooses. In the troop pickers Ctrl / Shift click
- * or middle click is Square (mark a troop; the highlight stays under the pointer).
+ * or middle click is Square (mark a troop; the game then moves to the next row, as with the pad).
  * Everywhere else: left = Circle, right = Cross, middle = Triangle, wheel = Up/Down.
  *
  * The battle map is a tilted plane: hex (col,row) has world position (col, row - 0.5 for even
@@ -58,7 +58,10 @@
 #define MENU_POS        0x800ADCE0u   /* per item: x, y (s32, 8.8 fixed); the icon is at x - 8 */
 #define MENU_W          80.0          /* item box: x - 8 .. x + 72, y - 3 .. y + 16 */
 #define MENU_H          19.0
-#define RAM_UI_FLAGS    0x800A6AB0u   /* bit 0: a free cursor takes input (map / grid), bit 8: strategy map */
+#define RAM_UI_FLAGS    0x800A6AB0u   /* bit 0: a free cursor takes input, bit 3: strategy map, bit 8: on a castle */
+#define RAM_CASTLE_CUR  0x800A698Cu   /* castle under the strategy cursor (valid with flag bit 8) */
+#define CASTLE_TABLE    0x80096760u   /* 28 bytes per castle: x, y (u16, world >> 8) at +4 / +6 */
+#define RAM_CASTLE_EXTRA 0x800DACD8u  /* bit 5: a 42nd castle exists */
 #define PANEL_Y 198.0                 /* the unit / terrain panel starts here (not map) */
 /* generic scrolling list (main EXE func 80021EB8: magic, skills, attacks, items...), $gp-relative */
 #define RAM_LIST_TOP    0x800A6820u   /* first visible item */
@@ -98,7 +101,6 @@ static u16 s_pulse_bits;                   /* button pulse in progress */
 static int s_pulse_frames, s_gap_frames;
 static int s_left, s_right, s_mid, s_wheel_up, s_wheel_down;   /* queued clicks */
 static int s_left_mod;                     /* the left click had Ctrl or Shift held */
-static int s_mark_row = -1, s_mark_wait;   /* troop list: row to keep highlighted after Square */
 
 static double s_acc_x, s_acc_y;            /* captured movement not applied yet, display pixels */
 static int s_abs;                          /* OS pointer moved (not captured): s_vx/s_vy is absolute */
@@ -289,6 +291,20 @@ static void smap_to_screen(double wx, double wz, double *sx, double *sy) {
     double u = wx - cu, v = wz - cv;
     *sx = 160 + u * smap_s(v); *sy = smap_y(v);
 }
+/* the game's castle hit test (overlay func 800B89D0), run after the mouse moves the cursor: which
+ * castle is under it decides the name shown and what Circle picks */
+static void smap_castle_hit(void) {
+    s32 gx = (s32)rd32(RAM_CUR_WX), gz = (s32)rd32(RAM_CUR_WZ);
+    int n = (rd32(RAM_CASTLE_EXTRA) & 0x20) ? 42 : 41;
+    u32 flags = rd32(RAM_UI_FLAGS) & ~0x100u;
+    for (int i = 0; i < n; i++) {
+        s32 cx = (s32)rd16(CASTLE_TABLE + 28 * i + 4) << 8, cz = (s32)rd16(CASTLE_TABLE + 28 * i + 6) << 8;
+        if (gx > cx - 4608 && gx < cx + 4608 && gz > cz - 3072 && gz < cz + 5120) {
+            wr32(RAM_CASTLE_CUR, (u32)i); flags |= 0x100; break;
+        }
+    }
+    wr32(RAM_UI_FLAGS, flags);
+}
 static void smap_to_world(double sx, double sy, double *wx, double *wz) {
     double v = 0;                                     /* f is strictly increasing: Newton */
     for (int i = 0; i < 20; i++) {
@@ -369,11 +385,6 @@ void mouse_update(void) {
     s_acc_x = s_acc_y = 0;
     int abs_move = s_abs; s_abs = 0;
     if (s_cool > 0) { s_cool--; s_moved = 0; mvx = mvy = 0; }
-    if (s_mark_wait > 0 && --s_mark_wait == 0 && s_mark_row >= 0) {
-        /* Square marked the row and the game moved its highlight down: keep it under the pointer */
-        if (list_active() && s_list_fixed && s_mark_row < s_list_count) list_select(s_mark_row);
-        s_mark_row = -1;
-    }
     if (s_pulse_frames > 0) { if (--s_pulse_frames == 0) s_pulse_bits = 0; s_moved = 0; return; }
     if (s_gap_frames > 0) { s_gap_frames--; s_moved = 0; return; }
 
@@ -383,7 +394,7 @@ void mouse_update(void) {
     u32 flags = rd32(RAM_UI_FLAGS);
     /* icon menu taking input (its state stays 2 after it closes; the cursor flag tells) */
     int menu = (s32)rd32(RAM_MENU_LAST) >= 0 && rd32(RAM_MENU_STATE) == 2 && !(flags & 1);
-    int smap = ovl == 5 && (flags & 0x101) == 0x101;
+    int smap = ovl == 5 && (flags & 0x9) == 0x9;
     int ctx = list_active() ? 4 : grid_active() ? 6 : menu ? 2 : smap ? 5
             : battle && (mode == 0 || mode == 2) && rd8(RAM_CUR_COL) != 0xFF ? 1 : battle ? 3 : 0;   /* 0xFF: cursor hidden */
     if (!battle && !smap && ctx != 2 && ctx != 4) mode = ctx == 6 ? 100 + (int)(rd32(GRID_MODE) != 0) : -1;
@@ -495,6 +506,7 @@ void mouse_update(void) {
             s_wx = wx; s_wz = wz;
             s_wr_x = (u32)(s32)lround(wx * 8192.0); s_wr_z = (u32)(s32)lround(wz * 8192.0);
             wr32(RAM_CUR_WX, s_wr_x); wr32(RAM_CUR_WZ, s_wr_z);
+            smap_castle_hit();
         }
         s_moved = 0;
         if (s_left) { s_left = 0; start_pulse(B_CIRCLE); s_cool = 20; return; }
@@ -578,7 +590,7 @@ void mouse_update(void) {
                 if (kk >= 0) { k = kk; list_select(k); }
             }
             s_left = 0; s_mid = 0;
-            start_pulse(B_SQUARE); s_mark_row = k; s_mark_wait = 12;
+            start_pulse(B_SQUARE);   /* like the pad: marks, and the game moves the highlight down */
             return;
         }
         if (s_left) {

@@ -211,7 +211,8 @@ static void tab_controls(void) {
          "mouse, click a castle; in troop lists Ctrl / Shift / middle click marks a troop. Menus, Organize grids and lists (attacks, magic, "
          "skills, SUMMON...): move up / down, click to choose, push past the end or use the wheel to scroll. Yes / No "
          "boxes: move left / right, click to answer. Unit status: point at an attack / spell / skill to read it. Right click = Cross "
-         "(back), middle click = Triangle, wheel = Up / Down. The mouse is released while this window is open or "
+         "(back), middle click = Triangle, wheel = Up / Down. Start = right click on a map (free cursor) or a side button. "
+         "DOMAIN: the box follows the mouse, click to jump there. SAVE / LOAD: point at a file, click. The mouse is released while this window is open or "
          "the game is in the background.");
     ImGui::Spacing();
     if (ImGui::BeginTable("keys", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {

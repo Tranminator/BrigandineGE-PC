@@ -60,11 +60,13 @@ choice), push against a screen edge to scroll; when the game moves its cursor it
 pad) the mouse continues from there; attack / spell targets are picked the same way. Strategy map: the
 quill follows the mouse (push past the edge to scroll), click a castle to open its menu. Icon menus
 (battle commands, castle, Organize), the Organize squad / stock grids and the scrolling lists (attacks,
-magic, skills, items, SUMMON monsters...): point, click to choose, push past the last row or use the wheel to
+magic, skills, items, SUMMON monsters, UNITS knights...): point, click to choose, push past the last row or use the wheel to
 scroll. Yes / No boxes: point at Yes or No (or wheel), click to answer. Unit status: point at an attack,
 spell or skill to read its description, click for the next page.
 In the MOVE / QUEST troop lists, Ctrl+click, Shift+click or middle click marks a troop (□ Select). Right click = × (back), middle click = △, wheel =
-up/down; on other screens left click = ○.
+up/down; on other screens left click = ○. Start: right click on a map with the free cursor (strategy or
+battle), or a side (back / forward) button anywhere. DOMAIN map: the box follows the mouse, click to jump
+there. SAVE / LOAD: point at a file, click.
 
 `F5` quick save, `F9` quick load (see below). `F1` shows all of VRAM (debug). Hold `Tab` to fast-forward.
 

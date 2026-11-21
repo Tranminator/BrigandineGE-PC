@@ -6,3 +6,6 @@ ov1:0x800D09A0   # strategy: SUMMON monster list (state machine, runs every fram
 0x800219B4       # Yes / No box (state gp+2096, choice gp+2196)
 0x8002B940       # icon menu input (castle / Start / Organize / battle commands)
 0x8002F840       # unit status page 2 (attacks / magic / skills), per frame
+0x80049AD4       # unit list (Start > UNITS knights...), per frame
+ov1:0x800C57D8   # strategy: DOMAIN overview map, per frame draw
+0x80045A74       # memory card save / load (state gp+3308, 40 = choosing a file)

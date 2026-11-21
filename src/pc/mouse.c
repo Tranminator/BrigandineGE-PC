@@ -25,7 +25,9 @@
  * last visible row (or the wheel) scrolls, a click chooses. The SUMMON monster list works the same way.
  * Yes / No boxes (main func 800219B4): the pointer's x picks the answer. Unit status page 2 (main func
  * 8002F840): the pointer picks the attack / spell / skill described. Icon menus count only while the game
- * runs their input (main func 8002B940): their state outlives them, under SUMMON, STATUS... In the troop pickers Ctrl / Shift click
+ * runs their input (main func 8002B940): their state outlives them, under SUMMON, STATUS...
+ * Also lists: UNITS (main func 80049AD4) and the memory card file boxes (main func 80045A74). DOMAIN
+ * overview map (strategy func 800C57D8): the box follows the pointer, a click jumps there. In the troop pickers Ctrl / Shift click
  * or middle click is Square (mark a troop; the game then moves to the next row, as with the pad).
  * Everywhere else: left = Circle, right = Cross, middle = Triangle, wheel = Up/Down. Start: the side
  * buttons, or right click on a map with the free cursor (strategy / battle, input mode 0).
@@ -75,6 +77,7 @@
 #define RAM_LIST_REDRAW 0x800A6860u   /* 2 = item texts must be redrawn (scrolled) */
 #define RAM_LIST_VIS    0x800A6864u   /* visible rows */
 #define WIN_TABLE       0x800ACE28u
+#define RAM_FADE        0x800A67BCu   /* bit 3: screen fading, no input */
 #define LIST_ROW        16.0          /* row pitch; row 0 starts 7 px below the window top, 8 px in */
 
 /* screen = H * (world - camera), camera = (camX / KX, camZ / KZ) */
@@ -170,6 +173,32 @@ static GridLayout grid_layout(void) {
 #define RAM_SUMMON_INDEX 0x800A6948u
 #define RAM_SUMMON_COUNT 0x800DC8A4u
 #define RAM_SUMMON_TOP   0x800DC8A8u
+/* Unit lists (main func 80049AD4: Start > UNITS knights / monsters...): 10 rows of 16 px from y 47, row 0
+ * is the column header (sorting), state 20 = choosing */
+#define RAM_UL_STATE 0x800A6CF4u
+#define RAM_UL_COUNT 0x800A6CDCu      /* s16 */
+#define RAM_UL_TOP   0x800A6CDEu      /* s16 */
+#define RAM_UL_ROW   0x800A6CE2u      /* s16, visible row 1..10, 0 = header */
+static unsigned s_ul_seen = 0x80000000u;
+void hook_f_main_80049AD4(Ctx *c) { (void)c; s_ul_seen = s_frame; }
+/* DOMAIN overview map (strategy overlay, drawn by func 800C57D8): a free box cursor, position in
+ * 1/256 px (screen = X / 256 + 35, Y / 256 - 5); Circle jumps the strategy map there */
+#define RAM_DOM_X    0x800DACD0u
+#define RAM_DOM_Y    0x800DACD4u
+#define RAM_DOM_HELP 0x800DB4FCu      /* non-zero: help text shown, no cursor */
+static unsigned s_dom_seen = 0x80000000u;
+static double s_dom_x, s_dom_y;
+static int s_dom_valid;
+static u32 s_dom_wx, s_dom_wy;
+void hook_f_ov1_800C57D8(Ctx *c) { (void)c; s_dom_seen = s_frame; }
+static int dom_active(void) {
+    return rd32(OVL_ID_ADDR) == 5 && s_frame - s_dom_seen <= 2 && !(rd32(RAM_FADE) & 8) && rd32(RAM_DOM_HELP) == 0;
+}
+/* memory card SAVE / LOAD (main func 80045A74): state 40 = choosing one of 3 file boxes (50 px from y 36) */
+#define RAM_MC_STATE 0x800A6CB4u
+#define RAM_MC_FILE  0x800A6CB0u
+static unsigned s_mc_seen = 0x80000000u;
+void hook_f_main_80045A74(Ctx *c) { (void)c; s_mc_seen = s_frame; }
 static unsigned s_summon_seen = 0x80000000u;
 static unsigned s_menu_seen = 0x80000000u;                /* frame the game last ran its icon menu input (main 8002B940) */
 void hook_f_main_8002B940(Ctx *c) { (void)c; s_menu_seen = s_frame; }
@@ -192,7 +221,6 @@ void hook_f_main_800219B4(Ctx *c) { (void)c; s_yn_seen = s_frame; }
 #define RAM_SP_MAGTOP 0x800A69D8u
 #define RAM_SP_NSKL   0x800A69E4u
 #define RAM_SP_SKLTOP 0x800A69E8u
-#define RAM_FADE      0x800A67BCu     /* bit 3: screen fading, no input */
 static unsigned s_sp_seen = 0x80000000u;
 static double s_sp_x, s_sp_y, s_sp_push;
 static int s_sp_valid;
@@ -217,13 +245,26 @@ typedef struct {
     u32 idx, top, redraw;        /* index / first visible row variables (top 0 = never scrolls) */
     int count, vis;              /* items, visible rows */
     double x, y, w, pitch;       /* first row's box, row pitch */
-    int kind;                    /* 1 generic, 2 troop picker, 3 summon */
+    int kind;                    /* 1 generic, 2 troop picker, 3 summon, 4 unit list, 5 memory card files */
+    int rel;                     /* idx / top are s16 and idx holds the visible row, 1-based (unit list) */
 } ListDesc;
 static ListDesc s_ld;
 static int s_list_fixed;         /* troop picker */
 static int list_active(void) {
     ListDesc *L = &s_ld;
-    s_list_fixed = 0;
+    s_list_fixed = 0; L->rel = 0;
+    if (s_frame - s_ul_seen <= 2 && rd32(RAM_UL_STATE) == 20 && !(rd32(RAM_FADE) & 8)) {
+        int n = (s16)rd16(RAM_UL_COUNT);
+        if (n < 1) return 0;
+        L->idx = RAM_UL_ROW; L->top = RAM_UL_TOP; L->redraw = 0; L->rel = 1;
+        L->count = n; L->vis = n < 10 ? n : 10; L->x = 8; L->y = 47; L->w = 304; L->pitch = 16; L->kind = 4;
+        return 1;
+    }
+    if (s_frame - s_mc_seen <= 2 && rd32(RAM_MC_STATE) == 40 && !(rd32(RAM_FADE) & 8)) {
+        L->idx = RAM_MC_FILE; L->top = 0; L->redraw = 0;
+        L->count = 3; L->vis = 3; L->x = 8; L->y = 36; L->w = 304; L->pitch = 50; L->kind = 5;
+        return 1;
+    }
     if (rd32(OVL_ID_ADDR) == 5 && s_frame - s_summon_seen <= 2 && rd32(RAM_SUMMON_STATE) == 0) {
         int n = (s32)rd32(RAM_SUMMON_COUNT);
         if (n < 1) return 0;
@@ -247,7 +288,9 @@ static int list_active(void) {
     s_list_fixed = 1;
     return 1;
 }
-static int list_top(void) { return s_ld.top ? (s32)rd32(s_ld.top) : 0; }
+static int list_top(void) { return !s_ld.top ? 0 : s_ld.rel ? (s16)rd16(s_ld.top) : (s32)rd32(s_ld.top); }
+/* selected item (-1: none, the unit list's header row) */
+static int list_cur(void) { return s_ld.rel ? list_top() + (s16)rd16(s_ld.idx) - 1 : (s32)rd32(s_ld.idx); }
 /* list item under a display position, -1 none */
 static int list_item_at(double px, double py) {
     const ListDesc *L = &s_ld;
@@ -264,6 +307,12 @@ static void list_select(int k) {
     int top = list_top(), nt = top;
     if (k < nt) nt = k;
     if (k > nt + L->vis - 1) nt = k - L->vis + 1;
+    if (L->rel) {
+        if (nt != top) wr16(L->top, (u16)nt);
+        wr16(L->idx, (u16)(k - nt + 1));
+        s_list_wr = k;
+        return;
+    }
     if (nt != top && L->top) { wr32(L->top, (u32)nt); if (L->redraw) wr32(L->redraw, 2); }
     if ((s32)rd32(L->idx) != k) wr32(L->idx, (u32)k);
     s_list_wr = k;
@@ -425,7 +474,8 @@ int mouse_event(const SDL_Event *e) {
 
 void mouse_cancel(void) { s_confirm_wait = 0; }
 
-static void start_pulse(u16 bits) { s_pulse_bits = bits; s_pulse_frames = 6; s_gap_frames = 2; }
+static void start_pulse_n(u16 bits, int frames) { s_pulse_bits = bits; s_pulse_frames = frames; s_gap_frames = 2; }
+static void start_pulse(u16 bits) { start_pulse_n(bits, 6); }
 
 /* pointer capture follows focus and the settings window */
 static void update_capture(void) {
@@ -471,18 +521,18 @@ void mouse_update(void) {
      * (SUMMON, STATUS...), so the game must also have run its menu input (hook) just now */
     int menu = (s32)rd32(RAM_MENU_LAST) >= 0 && rd32(RAM_MENU_STATE) == 2 && !(flags & 1) && s_frame - s_menu_seen <= 2;
     int smap = ovl == 5 && (flags & 0x9) == 0x9;
-    int ctx = yn_active() ? 7 : sp_active() ? 8 : list_active() ? 4 : grid_active() ? 6 : menu ? 2 : smap ? 5
+    int ctx = yn_active() ? 7 : sp_active() ? 8 : dom_active() ? 9 : list_active() ? 4 : grid_active() ? 6 : menu ? 2 : smap ? 5
             : battle && (mode == 0 || mode == 2) && rd8(RAM_CUR_COL) != 0xFF ? 1 : battle ? 3 : 0;   /* 0xFF: cursor hidden */
-    if (!battle && !smap && ctx != 2 && ctx != 4 && ctx != 7 && ctx != 8) mode = ctx == 6 ? 100 + (int)(rd32(GRID_MODE) != 0) : -1;
+    if (!battle && !smap && ctx != 2 && ctx != 4 && ctx != 7 && ctx != 8 && ctx != 9) mode = ctx == 6 ? 100 + (int)(rd32(GRID_MODE) != 0) : -1;
     if (ctx != s_last_ctx || mode != s_last_mode) {   /* screen / mode changed: re-anchor the pointer */
-        s_confirm_wait = 0; s_map_valid = 0; s_menu_valid = 0; s_list_valid = 0; s_grid_valid = 0; s_yn_valid = 0; s_sp_valid = 0;
+        s_confirm_wait = 0; s_map_valid = 0; s_menu_valid = 0; s_list_valid = 0; s_grid_valid = 0; s_yn_valid = 0; s_sp_valid = 0; s_dom_valid = 0;
         if (getenv("BRIG_MOUSE_TRACE")) rt_log("[mouse] frame %u ctx %d mode %d", s_frame, ctx, mode);
         s_last_ctx = ctx; s_last_mode = mode;
     }
     /* a click placed something: confirm once the game has taken it */
     if (s_confirm_wait > 0) {
         if (--s_confirm_wait == 0) {
-            if (s_confirm_menu >= 0) { if ((s32)rd32(s_confirm_addr) == s_confirm_menu) start_pulse(B_CIRCLE); }
+            if (s_confirm_menu >= 0) { if (!s_confirm_addr || (s32)rd32(s_confirm_addr) == s_confirm_menu) start_pulse(B_CIRCLE); }
             else if (rd8(RAM_CUR_COL) == s_confirm_col && rd8(RAM_CUR_ROW) == s_confirm_row) start_pulse(B_CIRCLE);
         }
         s_left = 0; s_moved = 0;
@@ -670,6 +720,33 @@ void mouse_update(void) {
             return;
         }
         return;
+    } else if (ctx == 9) {                            /* DOMAIN map: the box follows the pointer */
+        u32 gx = rd32(RAM_DOM_X), gy = rd32(RAM_DOM_Y);
+        if (!s_dom_valid || gx != s_dom_wx || gy != s_dom_wy) {   /* the pad moved it: continue from there */
+            s_dom_x = (s32)gx / 256.0 + 35; s_dom_y = (s32)gy / 256.0 - 5;
+            s_dom_wx = gx; s_dom_wy = gy; s_dom_valid = 1;
+            warp_os_pointer(s_dom_x, s_dom_y);
+            s_moved = 0;
+        }
+        if (s_moved) {
+            if (abs_move) { s_dom_x = s_vx; s_dom_y = s_vy; } else { s_dom_x += mvx; s_dom_y += mvy; }
+            if (s_dom_x < 6144 / 256.0 + 35) s_dom_x = 6144 / 256.0 + 35;
+            if (s_dom_x > 0xE700 / 256.0 + 35) s_dom_x = 0xE700 / 256.0 + 35;
+            if (s_dom_y < 8192 / 256.0 - 5) s_dom_y = 8192 / 256.0 - 5;
+            if (s_dom_y > 0xD700 / 256.0 - 5) s_dom_y = 0xD700 / 256.0 - 5;
+            s_dom_wx = (u32)(s32)lround((s_dom_x - 35) * 256); s_dom_wy = (u32)(s32)lround((s_dom_y + 5) * 256);
+            wr32(RAM_DOM_X, s_dom_wx); wr32(RAM_DOM_Y, s_dom_wy);
+        }
+        s_moved = 0;
+        if (s_left) {
+            /* the game only jumps if its cursor was moved by the pad since the map opened: put the box
+             * 1 px to the right and let a one-frame Left bring it back, then Circle */
+            s_left = 0;
+            wr32(RAM_DOM_X, s_dom_wx + 256);
+            start_pulse_n(B_LEFT, 1);
+            s_confirm_menu = 0; s_confirm_addr = 0; s_confirm_wait = 2; s_cool = 20;
+            return;
+        }
     } else if (ctx == 8) {                            /* unit status page 2: the pointer picks the item described */
         int sect = (s32)rd32(RAM_SP_SECT), idx = (s32)rd32(RAM_SP_INDEX);
         u32 key = (u32)(sect << 16 | (idx & 0xFFFF));
@@ -712,7 +789,7 @@ void mouse_update(void) {
         s_moved = 0;
         if (s_left) { s_left = 0; start_pulse(B_CIRCLE); s_cool = 20; return; }
     } else if (ctx == 4) {                            /* scrolling list: the pointer walks the items */
-        int cur = (s32)rd32(s_ld.idx);
+        int cur = list_cur();
         if (!s_list_valid || cur != s_list_wr) {      /* new list, or the game / keyboard moved it */
             s_list_pos = cur + 0.5; s_list_wr = cur; s_list_valid = 1;
         }
@@ -733,7 +810,7 @@ void mouse_update(void) {
         }
         s_moved = 0;
         if (troop && ((s_left && s_left_mod) || s_mid)) {   /* troop picker: Ctrl / Shift click or middle = Square */
-            int k = (s32)rd32(s_ld.idx);
+            int k = list_cur();
             if (s_left && (abs_move || !s_captured)) {
                 int kk = s_vx >= 0 ? list_item_at(s_vx, s_vy) : -1;
                 if (kk >= 0) { k = kk; list_select(k); }
@@ -744,13 +821,13 @@ void mouse_update(void) {
         }
         if (s_left) {
             s_left = 0;
-            int k = (s32)rd32(s_ld.idx);
+            int k = list_cur();
             if (abs_move || !s_captured) {            /* OS pointer: the item under it, or close when outside */
                 int kk = s_vx >= 0 ? list_item_at(s_vx, s_vy) : -1;
                 if (kk < 0) { start_pulse(B_CROSS); return; }
                 k = kk; list_select(k);
             }
-            s_confirm_menu = k; s_confirm_addr = s_ld.idx; s_confirm_wait = 2; s_cool = 20;
+            s_confirm_menu = k; s_confirm_addr = s_ld.rel ? 0 : s_ld.idx; s_confirm_wait = 2; s_cool = 20;
             return;
         }
         return;

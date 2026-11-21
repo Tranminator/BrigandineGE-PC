@@ -27,7 +27,8 @@
  * 8002F840): the pointer picks the attack / spell / skill described. Icon menus count only while the game
  * runs their input (main func 8002B940): their state outlives them, under SUMMON, STATUS... In the troop pickers Ctrl / Shift click
  * or middle click is Square (mark a troop; the game then moves to the next row, as with the pad).
- * Everywhere else: left = Circle, right = Cross, middle = Triangle, wheel = Up/Down.
+ * Everywhere else: left = Circle, right = Cross, middle = Triangle, wheel = Up/Down. Start: the side
+ * buttons, or right click on a map with the free cursor (strategy / battle, input mode 0).
  *
  * The battle map is a tilted plane: hex (col,row) has world position (col, row - 0.5 for even
  * columns) and the screen position is a homography of (world - camera), fitted to the game's
@@ -85,6 +86,7 @@ static const double H[3][3] = {
 static const double KX = 3.260455542e+01, KZ = 3.198126134e+01;
 
 /* PS1 pad bits */
+#define B_START  (1u << 3)
 #define B_UP     (1u << 4)
 #define B_RIGHT  (1u << 5)
 #define B_DOWN   (1u << 6)
@@ -103,6 +105,7 @@ static float s_px_per_pt = 1.0f;
 static u16 s_pulse_bits;                   /* button pulse in progress */
 static int s_pulse_frames, s_gap_frames;
 static int s_left, s_right, s_mid, s_wheel_up, s_wheel_down;   /* queued clicks */
+static int s_side;                         /* side (back / forward) button: Start */
 static int s_left_mod;                     /* the left click had Ctrl or Shift held */
 
 static double s_acc_x, s_acc_y;            /* captured movement not applied yet, display pixels */
@@ -410,6 +413,7 @@ int mouse_event(const SDL_Event *e) {
         }
         else if (e->button.button == SDL_BUTTON_RIGHT) s_right++;
         else if (e->button.button == SDL_BUTTON_MIDDLE) s_mid++;
+        else if (e->button.button == SDL_BUTTON_X1 || e->button.button == SDL_BUTTON_X2) s_side++;
         return 1;
     case SDL_MOUSEWHEEL:
         if (e->wheel.y > 0) s_wheel_up++;
@@ -485,7 +489,9 @@ void mouse_update(void) {
         return;
     }
 
-    if (s_right) { s_right = 0; s_left = 0; start_pulse(B_CROSS); return; }
+    if (s_side) { s_side = 0; s_left = 0; start_pulse(B_START); return; }
+    /* right click = Cross (back); on a map with the free cursor (Cross does nothing there) = Start */
+    if (s_right) { s_right = 0; s_left = 0; start_pulse((ctx == 1 || ctx == 5) && mode == 0 ? B_START : B_CROSS); return; }
     int troop = ctx == 4 && s_list_fixed;              /* troop picker: Square = mark */
     if (s_mid && !troop) { s_mid = 0; start_pulse(B_TRI); return; }
 

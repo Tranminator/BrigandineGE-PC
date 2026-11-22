@@ -28,6 +28,8 @@
  * Yes / No boxes (main func 800219B4): the pointer's x picks the answer. Unit status page 2 (main func
  * 8002F840): the pointer picks the attack / spell / skill described. Icon menus count only while the game
  * runs their input (main func 8002B940): their state outlives them, under SUMMON, STATUS...
+ * Title screen (overlay 3): a click passes PUSH START BUTTON (Start), its menu is a list. SELECT RULER: a
+ * sideways push or the wheel is Left / Right.
  * Also lists: UNITS (main func 80049AD4) and the memory card file boxes (main func 80045A74). DOMAIN
  * overview map (strategy func 800C57D8): the box follows the pointer, a click jumps there. In the troop pickers Ctrl / Shift click
  * or middle click is Square (mark a troop; the game then moves to the next row, as with the pad).
@@ -84,6 +86,10 @@
 #define RAM_LIST_VIS    0x800A6864u   /* visible rows */
 #define WIN_TABLE       0x800ACE28u
 #define RAM_FADE        0x800A67BCu   /* bit 3: screen fading, no input */
+/* title screen (overlay 3, id 7, func 800B73F0): state 100 = PUSH START BUTTON (Start only), 110 = menu
+ * NEWGAME / CONTINUE / TUTORIAL / RECOLLECTION, index in the generic list index; rows y 114 + 18 k */
+#define TITLE_OVL       7u
+#define RAM_TITLE_STATE 0x800C6B38u
 #define LIST_ROW        16.0          /* row pitch; row 0 starts 7 px below the window top, 8 px in */
 
 /* screen = H * (world - camera), camera = (camX / KX, camZ / KZ) */
@@ -204,6 +210,14 @@ void hook_f_ov1_800C57D8(Ctx *c) { (void)c; s_dom_seen = s_frame; }
 static int dom_active(void) {
     return rd32(OVL_ID_ADDR) == 5 && s_frame - s_dom_seen <= 2 && !(rd32(RAM_FADE) & 8) && rd32(RAM_DOM_HELP) == 0;
 }
+/* SELECT RULER (new game, overlay 3, func 800B81EC): state 10 = choosing (20 = the Yes / No that follows); Left / Right step through the
+ * 6 rulers (index 0x800C6B70), Circle picks */
+#define RAM_RULER_STATE 0x800C6B44u
+static unsigned s_ruler_seen = 0x80000000u;
+void hook_f_ov3_800B81EC(Ctx *c) { (void)c; s_ruler_seen = s_frame; }
+static int ruler_active(void) {
+    return rd32(OVL_ID_ADDR) == TITLE_OVL && s_frame - s_ruler_seen <= 2 && rd32(RAM_RULER_STATE) == 10 && !(rd32(RAM_FADE) & 8);
+}
 /* memory card SAVE / LOAD (main func 80045A74): state 40 = choosing one of 3 file boxes (50 px from y 36) */
 #define RAM_MC_STATE 0x800A6CB4u
 #define RAM_MC_FILE  0x800A6CB0u
@@ -261,15 +275,22 @@ typedef struct {
     u32 idx, top, redraw;        /* index / first visible row variables (top 0 = never scrolls) */
     int count, vis;              /* items, visible rows */
     double x, y, w, pitch;       /* first row's box, row pitch */
-    int kind;                    /* 1 generic, 2 troop picker, 3 summon, 4 unit list, 5 memory card files, 6 small menu */
+    int kind;                    /* 1 generic, 2 troop picker, 3 summon, 4 unit list, 5 memory card files, 6 small menu, 7 title */
     int rel;                     /* idx / top are s16 and idx holds the visible row, 1-based (unit list) */
     int pad_scroll;              /* total unknown: pick among the visible rows, scroll with Up / Down */
 } ListDesc;
 static ListDesc s_ld;
 static int s_list_fixed;         /* troop picker */
+static double disp_w(void);
 static int list_active(void) {
     ListDesc *L = &s_ld;
     s_list_fixed = 0; L->rel = 0; L->pad_scroll = 0;
+    if (rd32(OVL_ID_ADDR) == TITLE_OVL && rd32(RAM_TITLE_STATE) == 110 && !(rd32(RAM_FADE) & 8)) {
+        L->idx = RAM_LIST_INDEX; L->top = 0; L->redraw = 0;
+        L->count = 4; L->vis = 4; L->x = disp_w() * 0.3; L->y = 114; L->w = disp_w() * 0.4;   /* the title runs 640 wide */
+        L->pitch = 18; L->kind = 7;
+        return 1;
+    }
     if (s_frame - s_ul_seen <= 2 && rd32(RAM_UL_STATE) == 20 && !(rd32(RAM_FADE) & 8)) {
         int n = (s16)rd16(RAM_UL_COUNT);
         if (n < 1) return 0;
@@ -501,6 +522,15 @@ void mouse_cancel(void) { s_confirm_wait = 0; }
 static void start_pulse_n(u16 bits, int frames) { s_pulse_bits = bits; s_pulse_frames = frames; s_gap_frames = 2; }
 static void start_pulse(u16 bits) { start_pulse_n(bits, 6); }
 
+/* a deliberate sideways push of the captured mouse (not a wobble): -1 / +1 = Left / Right, 0 none */
+static int page_push(double mvx, double mvy, int abs_move) {
+    if (s_moved && !abs_move && fabs(mvx) > fabs(mvy)) {
+        s_hpush += mvx;
+        if (fabs(s_hpush) >= 64) return s_hpush > 0 ? 1 : -1;
+    } else if (s_moved && fabs(mvy) > fabs(mvx)) s_hpush = 0;
+    return 0;
+}
+
 /* maps: pushing the pointer outwards against an edge holds that D-pad direction, so the game moves its
  * cursor and camera at its own speed (Cursor Speed option) for as long as the pointer stays there;
  * moving the other way lets go */
@@ -561,9 +591,9 @@ void mouse_update(void) {
      * (SUMMON, STATUS...), so the game must also have run its menu input (hook) just now */
     int menu = (s32)rd32(RAM_MENU_LAST) >= 0 && rd32(RAM_MENU_STATE) == 2 && !(flags & 1) && s_frame - s_menu_seen <= 2;
     int smap = ovl == 5 && (flags & 0x9) == 0x9;
-    int ctx = yn_active() ? 7 : sp_active() ? 8 : dom_active() ? 9 : list_active() ? 4 : grid_active() ? 6 : menu ? 2 : smap ? 5
+    int ctx = yn_active() ? 7 : sp_active() ? 8 : dom_active() ? 9 : ruler_active() ? 10 : list_active() ? 4 : grid_active() ? 6 : menu ? 2 : smap ? 5
             : battle && (mode == 0 || mode == 2) && rd8(RAM_CUR_COL) != 0xFF ? 1 : battle ? 3 : 0;   /* 0xFF: cursor hidden */
-    if (!battle && !smap && ctx != 2 && ctx != 4 && ctx != 7 && ctx != 8 && ctx != 9) mode = ctx == 6 ? 100 + (int)(rd32(GRID_MODE) != 0) : -1;
+    if (!battle && !smap && ctx != 2 && ctx != 4 && ctx != 7 && ctx != 8 && ctx != 9 && ctx != 10) mode = ctx == 6 ? 100 + (int)(rd32(GRID_MODE) != 0) : -1;
     /* edge hold: maps with the captured pointer only; a click, the OS pointer or another screen lets go */
     if (!((ctx == 1 || ctx == 5) && s_captured && !abs_move) || s_left || s_right || s_mid) s_edge_bits = 0;
     else edge_release(mvx, mvy);
@@ -584,6 +614,8 @@ void mouse_update(void) {
 
     if (s_side) { s_side = 0; s_left = 0; start_pulse(B_START); return; }
     /* right click = Cross (back); on a map with the free cursor (Cross does nothing there) = Start */
+    /* title screen, PUSH START BUTTON: the game only takes Start there */
+    if (s_left && rd32(OVL_ID_ADDR) == TITLE_OVL && rd32(RAM_TITLE_STATE) == 100) { s_left = 0; start_pulse(B_START); s_cool = 20; return; }
     if (s_right) { s_right = 0; s_left = 0; start_pulse((ctx == 1 || ctx == 5) && mode == 0 ? B_START : B_CROSS); return; }
     int troop = ctx == 4 && s_list_fixed;              /* troop picker: Square = mark */
     if (s_mid && !troop) { s_mid = 0; start_pulse(B_TRI); return; }
@@ -767,6 +799,17 @@ void mouse_update(void) {
             return;
         }
         return;
+    } else if (ctx == 10) {                           /* SELECT RULER: sideways push / wheel = Left / Right */
+        int dir = page_push(mvx, mvy, abs_move);
+        if (s_wheel_up || s_wheel_down) { dir = s_wheel_down > s_wheel_up ? 1 : -1; s_wheel_up = s_wheel_down = 0; }
+        if (!dir && s_left && (abs_move || !s_captured) && s_vy >= 180 && s_vy < 205 && (s_vx < 40 || (s_vx >= 200 && s_vx < 240))) {
+            dir = s_vx < 40 ? -1 : 1;                 /* OS pointer: the red arrows beside the text box */
+            s_left = 0;
+        }
+        s_moved = 0;
+        if (dir) { s_hpush = 0; start_pulse(dir > 0 ? B_RIGHT : B_LEFT); return; }
+        if (s_left) { s_left = 0; start_pulse(B_CIRCLE); s_cool = 20; return; }
+        return;
     } else if (ctx == 9) {                            /* DOMAIN map: the box follows the pointer */
         u32 gx = rd32(RAM_DOM_X), gy = rd32(RAM_DOM_Y);
         if (!s_dom_valid || gx != s_dom_wx || gy != s_dom_wy) {   /* the pad moved it: continue from there */
@@ -838,11 +881,7 @@ void mouse_update(void) {
     } else if (ctx == 4) {                            /* scrolling list: the pointer walks the items */
         int cur = list_cur();
         if (s_ld.kind == 4) {                         /* unit list: Left / Right show other columns */
-            int dir = 0;
-            if (s_moved && !abs_move && fabs(mvx) > fabs(mvy)) {
-                s_hpush += mvx;                       /* a deliberate sideways push, not a wobble */
-                if (fabs(s_hpush) >= 64) dir = s_hpush > 0 ? 1 : -1;
-            } else if (s_moved && fabs(mvy) > fabs(mvx)) s_hpush = 0;
+            int dir = page_push(mvx, mvy, abs_move);
             if (!dir && s_left && (abs_move || !s_captured) && s_vy >= 0 && s_vy < 45 && (s_vx < 60 || s_vx >= 260)) {
                 dir = s_vx < 60 ? -1 : 1;             /* OS pointer: the page arrows in the top corners */
                 s_left = 0;

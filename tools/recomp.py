@@ -385,7 +385,9 @@ class FuncGen:
             out += ["    }"]
         else:
             out = [f"/* {name} */", f"void {fn}(Ctx *c) {{"]
-        if (seg.sid, self.start) in self.ctx.get("hooks", ()):   # primary entry only
+        if (seg.sid, self.start) in self.ctx.get("overrides", ()):   # "!" entry: the hook may replace the function
+            out.append(f"    if (hook_{fn}(c)) return;   /* src/pc/hook_list.txt (override) */")
+        elif (seg.sid, self.start) in self.ctx.get("hooks", ()):   # primary entry only
             out.append(f"    hook_{fn}(c);   /* src/pc/hook_list.txt */")
         a = self.start
         while a < self.end:
@@ -500,13 +502,15 @@ def main():
     if os.path.exists(hle_path):
         hle_names = {l.split("#")[0].strip() for l in open(hle_path)} - {""}
     hooks = set()   # functions that call hook_<name>(c) on entry (args readable, nothing replaced)
+    overrides = set()   # "!" entries: int hook_<name>(c); non-zero = the function returns at once (replaced)
     hook_path = os.path.join(ROOT, "src/pc/hook_list.txt")
     if os.path.exists(hook_path):
         for l in open(hook_path):
             l = l.split("#")[0].strip()
-            if l:   # "0x80021EB8" (main EXE) or "ov1:0x800CDB1C" (overlay)
-                sid, _, a = l.rpartition(":")
-                hooks.add((sid or "main", int(a, 16)))
+            if l:   # "0x80021EB8" (main EXE), "ov1:0x800CDB1C" (overlay), "!0x8004C64C" (override)
+                ov = l.startswith("!")
+                sid, _, a = l.lstrip("!").rpartition(":")
+                (overrides if ov else hooks).add((sid or "main", int(a, 16)))
     main_seg = segs[0]
     hle_by_addr = {a: n for a, n in main_seg.names.items() if n in hle_names}
     starts = {}
@@ -523,7 +527,7 @@ def main():
                     st.add(t)
         starts[s.sid] = st
     ctx = {"main": main_seg, "hle_by_addr": hle_by_addr, "starts": starts,
-           "data_ptrs": data_pointers(segs), "hooks": hooks}
+           "data_ptrs": data_pointers(segs), "hooks": hooks, "overrides": overrides}
     os.makedirs(OUT, exist_ok=True)
     protos, tables = [], []
     stats = {}
@@ -603,6 +607,8 @@ def main():
             f.write(f"void hle_{n}(Ctx *c);\n")
         for sid, a in sorted(hooks):
             f.write(f"void hook_f_{sid}_{a:08X}(Ctx *c);\n")
+        for sid, a in sorted(overrides):
+            f.write(f"int hook_f_{sid}_{a:08X}(Ctx *c);\n")
     with open(os.path.join(OUT, "recomp_tables.c"), "w") as f:
         f.write('#include "recomp_funcs.h"\n')
         for sid, tab in tables:

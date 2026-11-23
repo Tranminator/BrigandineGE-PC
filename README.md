@@ -43,13 +43,12 @@ cmake -S . -B build/cmake && cmake --build build/cmake -j8
 ./build/cmake/brigandine "iso/Disc 1/<disc1>.bin"                       # Disc 2 is found in "iso/Disc 2/"
 ./build/cmake/brigandine "<disc1>.bin" "<disc2>.bin"                     # or name it explicitly
 ```
-The game needs Disc 2 for some story movies, and asks for it ("Insert disk 2"). The port then puts the
-Disc 2 image in the drive by itself (a short "Disc 2 inserted" message) and the game goes on; nothing has to be
-done. Disc 2 is looked for at the Disc 1 path with "Disc 1" changed to "Disc 2" (that file, or the first `.bin`
-in that folder). Without it the game stays on "Insert disk 2".
-The port remembers which disc was in the drive when you last played and starts with that one, like leaving
-Disc 2 in a PlayStation: loading a Disc 2 save from the memory card then needs no disc check; only a Disc 1 save
-or a new game asks for Disc 1. Save states (F5 / F9) load on either disc.
+The game needs Disc 2 for some story movies (and a new game needs Disc 1). Where the console would stop on
+"Insert disk 2", the port puts the other disc image in the drive itself and the game goes straight on: no disc
+screen, only a small "Disc 2" note. Disc 2 is looked for at the Disc 1 path with "Disc 1" changed to "Disc 2"
+(that file, or the first `.bin` in that folder). Without it the game shows its own "Insert disk 2" screen.
+The port also starts with the disc that was in the drive at the end of the last session. Save states
+(F5 / F9) and memory card saves load on either disc.
 | PS1 | Keyboard | Controller |
 |---|---|---|
 | D-pad | Arrow keys | D-pad |

@@ -16,7 +16,6 @@ static u32 g_cd_frac;         /* sub-sector accumulator, units of 1/60 sector */
 static u8  g_cd_lastcom;
 static u8  g_xa_file, g_xa_chan;  /* CdlSetfilter */
 static u8  g_cd_result[8];
-static int g_shell_open;      /* disc swap: Getstat reports the lid open for this many more polls */
 static u32 g_head;            /* where the drive head is after the last data read */
 static u32 g_read_done_vb;    /* vblank count at which the pending CdRead completes */
 static u32 g_read_last_poll;  /* vblank count of the previous CdReadSync poll */
@@ -59,7 +58,6 @@ static void cd_command(Ctx *c) {
     u32 com = c->r[4] & 0xFF, param = c->r[5], result = c->r[6];
     memset(g_cd_result, 0, sizeof g_cd_result);
     g_cd_result[0] = g_cd_reading ? 0x22 : 0x02; /* stat: motor on (+reading) */
-    if (com == 0x01 && g_shell_open > 0) { g_shell_open--; g_cd_result[0] = 0x10; }   /* Getstat: lid open (swap) */
     switch (com) {
     case 0x02: if (param) g_cd_pos = loc_to_lba(param); break;                 /* Setloc */
     case 0x0E: if (param) g_cd_mode = (u8)rd8(param); break;                   /* Setmode */
@@ -183,21 +181,38 @@ void cd_state(StateIO *s) {
     ST(s, g_read_last_poll); ST(s, g_read_sectors_per_vb10);
 }
 
-/* "Insert disk N" (main func 8004C64C): the game always asks for the other disc (gp+4 = 0x800A5FCC
- * holds the current one, 0 = Disc 1). Swap the image in before its checks run, so they pass at once:
- * CdSearchFile then finds SLPS_026.61 / .62 and the game patches its per-disc LBAs itself. The lid
- * is reported open for a few Getstat polls, then closed: the game only checks after that. */
-#define RAM_DISC 0x800A5FCCu
+/* "Insert disk N" (main func 8004C64C), replaced: the game always asks for the other disc (gp+4 =
+ * 0x800A5FCC holds the current one, 0 = Disc 1). The original shows a screen, waits for the lid to
+ * open and close, then identifies the disc (func 8004CF54: MOVIE/BUG16.STR = Disc 1, BUG17.STR =
+ * Disc 2), which sets 0x800A5FCC and patches the per-disc LBAs. Here the other image goes in at once
+ * and 8004CF54 runs directly: no screen, no wait. Without that image (or if the check fails) the
+ * original routine runs and shows "Insert disk N" as on the console. */
+#define RAM_DISC  0x800A5FCCu
+#define RAM_FLAGS 0x800A67BCu
 void ui_toast(const char *msg);
-void hook_f_main_8004C64C(Ctx *c) {
-    (void)c;
+int hook_f_main_8004C64C(Ctx *c) {
     int want = 1 - (int)(rd32(RAM_DISC) & 1);
-    char msg[96];
-    /* the game waits for the lid to open and close (Getstat bit 4) before it checks the disc */
-    if (disc_select(want)) { snprintf(msg, sizeof msg, "Disc %d inserted", want + 1); g_shell_open = 10; }
-    else snprintf(msg, sizeof msg, "Disc %d image not found: put it next to Disc %d, or pass it as the 2nd argument", want + 1, 2 - want);
-    rt_log("[disc] the game asks for Disc %d: %s", want + 1, msg);
+    char msg[128];
+    if (!disc_select(want)) {
+        snprintf(msg, sizeof msg, "Disc %d image not found: put it next to Disc %d, or pass it as the 2nd argument",
+                 want + 1, 2 - want);
+        rt_log("[disc] the game asks for Disc %d: %s", want + 1, msg);
+        ui_toast(msg);
+        return 0;                                     /* the game's own "Insert disk" screen */
+    }
+    f_main_8004CF54(c);                               /* identify the disc: 0x800A5FCC + per-disc LBAs */
+    if (!c->r[2] || (int)(rd32(RAM_DISC) & 1) != want) {
+        rt_log("[disc] Disc %d check failed, falling back to the game's screen", want + 1);
+        return 0;
+    }
+    /* what the routine leaves behind: flag bit 0 clear, bit 2 set, its two work variables cleared */
+    wr32(RAM_FLAGS, (rd32(RAM_FLAGS) & ~1u) | 4u);
+    wr32(0x800A6828u, 0);
+    wr32(0x800A6860u, 0);
+    snprintf(msg, sizeof msg, "Disc %d", want + 1);
+    rt_log("[disc] the game asks for Disc %d: swapped in", want + 1);
     ui_toast(msg);
+    return 1;
 }
 
 /* after a save-state load: the drive holds the disc the game believes it has */

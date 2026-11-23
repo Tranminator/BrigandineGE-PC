@@ -104,6 +104,24 @@ static bool slider_pct(const char *label, int *v) {
     return ch;
 }
 
+/* mouse help, shown by the ? button next to "Mouse control" */
+static const char *MOUSE_HELP =
+    "The mouse drives the game's own cursor (one pointer). It is released while this window is open or the game is in the background.\n"
+    "\n"
+    "Buttons: left = Circle, right = Cross (back), middle = Triangle, wheel = Up / Down. Start = right click on a map with the free cursor, or a side button.\n"
+    "\n"
+    "- Battle map: move to a hex, click to select; attack / spell targets the same way.\n"
+    "- Strategy map: the quill follows the mouse, click a castle.\n"
+    "- Both maps: push against an edge to scroll; it keeps scrolling at the game's Cursor Speed until you move back.\n"
+    "- Menus, Organize grids, lists (attacks, magic, skills, SUMMON...): point, click; push past the end or use the wheel to scroll.\n"
+    "- Troop lists: Ctrl / Shift / middle click marks a troop.\n"
+    "- Yes / No: move left / right, click. Unit status: point at an attack / spell / skill to read it.\n"
+    "- Events: click for the next line, hold the left button to fast-forward (also during the enemy's battle turn).\n"
+    "- UNITS: push sideways for the other columns; above the first knight is the header row: pick a column, click to sort.\n"
+    "- DOMAIN: the box follows the mouse, click to jump. SAVE / LOAD: point at a file, click.\n"
+    "- EQUIP / ITEM: point at an item, click. NAME: point at a letter or command, click.\n"
+    "- Title: click for PUSH START, then point and click. SELECT RULER: push sideways or use the wheel.";
+
 static void hint(const char *t) {   /* wrapped, dimmed help text */
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
     ImGui::TextWrapped("%s", t);
@@ -199,6 +217,14 @@ static void tab_controls(void) {
     };
     bool m = g_settings.mouse != 0;
     if (ImGui::Checkbox("Mouse control", &m)) g_settings.mouse = m;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("?")) ImGui::OpenPopup("mouse_help");
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("How the mouse works");
+    ImGui::SetNextWindowSize(ImVec2(560, 0));
+    if (ImGui::BeginPopup("mouse_help")) {
+        ImGui::TextWrapped("%s", MOUSE_HELP);
+        ImGui::EndPopup();
+    }
     ImGui::BeginDisabled(!m);
     bool cap = g_settings.mouse_capture != 0;
     if (ImGui::Checkbox("Game pointer (captures the mouse)", &cap)) g_settings.mouse_capture = cap;
@@ -206,14 +232,6 @@ static void tab_controls(void) {
     ImGui::SliderInt("Pointer speed", &g_settings.mouse_speed, 5, 100, "%d%%");
     ImGui::EndDisabled();
     ImGui::EndDisabled();
-    hint("The mouse drives the game's own cursor (one pointer). Battle map: move to a hex, click to select, push "
-         "against a screen edge to scroll (keeps scrolling at the game's Cursor Speed until you move back); attack / spell targets the same way. Strategy map: the quill follows the "
-         "mouse, click a castle; in troop lists Ctrl / Shift / middle click marks a troop. Menus, Organize grids and lists (attacks, magic, "
-         "skills, SUMMON...): move up / down, click to choose, push past the end or use the wheel to scroll. Yes / No "
-         "boxes: move left / right, click to answer. Unit status: point at an attack / spell / skill to read it. Right click = Cross "
-         "(back), middle click = Triangle, wheel = Up / Down. Start = right click on a map (free cursor) or a side button. "
-         "DOMAIN: the box follows the mouse, click to jump there. Events: click for the next line, hold the left button to fast-forward (also during the enemy's battle turn). Title: click for PUSH START, then point and click. SELECT RULER: push sideways or use the wheel for the next ruler. EQUIP / ITEM: point at an item, click; push past the grid or use the wheel to scroll. NAME: point at a letter or command, click. SAVE / LOAD: point at a file, click. UNITS: push the mouse sideways for the other columns; above the first knight is the header row: pick a column, click to sort. The mouse is released while this window is open or "
-         "the game is in the background.");
     ImGui::Spacing();
     if (ImGui::BeginTable("keys", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {
         ImGui::TableSetupColumn("PS1"); ImGui::TableSetupColumn("Keyboard"); ImGui::TableSetupColumn("Controller");
@@ -288,8 +306,20 @@ static void tab_save(void) {
         ImGui::PushID(v.slot);
         ImVec2 p0 = ImGui::GetCursorScreenPos();
         bool selected = manual && v.slot == state_slot();
+        /* the row keeps its highlight while the pointer is on its buttons too (the Selectable alone loses
+         * hover there and the row blinks): draw it ourselves, the Selectable stays transparent */
+        ImVec2 p1(p0.x + ImGui::GetContentRegionAvail().x, p0.y + th);
+        bool row_hot = ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect(p0, p1);
+        if (selected || row_hot) {
+            ImVec4 col = ImGui::GetStyleColorVec4(selected ? ImGuiCol_Header : ImGuiCol_HeaderHovered);
+            if (!selected) col.w *= 0.45f;            /* hover: lighter than the selected slot, buttons stay readable */
+            ImGui::GetWindowDrawList()->AddRectFilled(p0, p1, ImGui::GetColorU32(col), ImGui::GetStyle().FrameRounding);
+        }
+        ImGui::PushStyleColor(ImGuiCol_Header, 0); ImGui::PushStyleColor(ImGuiCol_HeaderHovered, 0);
+        ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImGui::GetColorU32(ImGuiCol_HeaderActive));
         if (ImGui::Selectable("##row", selected, ImGuiSelectableFlags_AllowOverlap, ImVec2(0, th)) && manual)
             state_set_slot(v.slot);
+        ImGui::PopStyleColor(3);
         ImGui::SetCursorScreenPos(p0);
         if (v.status == 1 && v.tex) ImGui::Image((ImTextureID)(intptr_t)v.tex, ImVec2(tw, th));
         else {

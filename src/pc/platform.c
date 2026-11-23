@@ -19,6 +19,12 @@
 
 static SDL_Window *g_win;
 static SDL_GameController *g_pad;
+/* controller: Back held + D-pad Left / Right changes the save slot (like Left Shift + arrows), Back + LB
+ * quick saves (F5), Back + RB quick loads (F9). While Back is held the game gets neither Select nor
+ * Left / Right / L1 / R1; a Back tap without a combo is Select. */
+static int g_back_combo;      /* a slot change happened during this Back press */
+static int g_select_pulse;    /* frames of Select still to send after a plain Back tap */
+static SDL_Joystick *g_vjoy; /* tests (BRIG_VPAD): virtual controller */
 static int g_quit, g_show_vram;
 static u32 g_frame[VRAM_W * VRAM_H];
 static int g_tex_w, g_tex_h;          /* size of the image currently in the GL texture */
@@ -63,7 +69,11 @@ int platform_init(const char *title) {
     if (!g_gl_ok) { rt_log("[video] OpenGL 3.3 is required: %s", SDL_GetError()); return 0; }
     SDL_DisplayMode dm;
     g_refresh_hz = SDL_GetCurrentDisplayMode(SDL_GetWindowDisplayIndex(g_win), &dm) == 0 ? dm.refresh_rate : 0;
-    for (int i = 0; i < SDL_NumJoysticks(); i++)
+    if (getenv("BRIG_VPAD")) {                        /* tests: a virtual controller driven by BRIG_KEYS PadDown= / PadUp= */
+        int vi = SDL_JoystickAttachVirtual(SDL_JOYSTICK_TYPE_GAMECONTROLLER, 6, SDL_CONTROLLER_BUTTON_MAX, 0);
+        if (vi >= 0) { g_pad = SDL_GameControllerOpen(vi); g_vjoy = SDL_JoystickOpen(vi); }
+    }
+    for (int i = 0; i < SDL_NumJoysticks() && !g_pad; i++)
         if (SDL_IsGameController(i)) { g_pad = SDL_GameControllerOpen(i); break; }
     if (getenv("BRIG_SHOW_VRAM")) g_show_vram = 1;
     platform_apply_video();
@@ -199,6 +209,9 @@ static void inject_keys(void) {
             ev.type = SDL_MOUSEMOTION; ev.motion.xrel = atoi(name + 4);
             ev.motion.yrel = strchr(name, ';') ? atoi(strchr(name, ';') + 1) : 0;
             ev.button.windowID = g_win ? SDL_GetWindowID(g_win) : 0; SDL_PushEvent(&ev);
+        } else if (f == frame && (!strncmp(name, "PadDown=", 8) || !strncmp(name, "PadUp=", 6))) {
+            /* tests (BRIG_VPAD): virtual controller button, by SDL_GameControllerButton number */
+            if (g_vjoy) SDL_JoystickSetVirtualButton(g_vjoy, atoi(strchr(name, '=') + 1), name[3] == 'D');
         } else if (f == frame && (!strncmp(name, "LDown", 5) || !strncmp(name, "LUp", 3))) {
             /* scripted left button held / released (LClick is a press and release) */
             SDL_Event ev; memset(&ev, 0, sizeof ev);
@@ -302,6 +315,7 @@ void platform_vblank(void) {
     inject_keys();
     poke_ram();
     dump_ram();
+    if (g_select_pulse > 0) g_select_pulse--;
     while (SDL_PollEvent(&e)) {
         if (e.type == SDL_QUIT) g_quit = 1;
         if (ui_event(&e)) continue;                   /* settings UI (F2) consumed it */
@@ -337,6 +351,20 @@ void platform_vblank(void) {
                        SDL_GetKeyName(kc), e.type == SDL_KEYDOWN ? "DOWN" : "UP");
         }
         if (e.type == SDL_CONTROLLERDEVICEADDED && !g_pad) g_pad = SDL_GameControllerOpen(e.cdevice.which);
+        if (e.type == SDL_CONTROLLERBUTTONDOWN && g_pad && SDL_GameControllerGetButton(g_pad, SDL_CONTROLLER_BUTTON_BACK) &&
+            (e.cbutton.button == SDL_CONTROLLER_BUTTON_DPAD_LEFT || e.cbutton.button == SDL_CONTROLLER_BUTTON_DPAD_RIGHT)) {
+            state_cycle_slot(e.cbutton.button == SDL_CONTROLLER_BUTTON_DPAD_LEFT ? -1 : 1);   /* Back + D-pad: save slot */
+            g_back_combo = 1;
+        }
+        if (e.type == SDL_CONTROLLERBUTTONDOWN && g_pad && SDL_GameControllerGetButton(g_pad, SDL_CONTROLLER_BUTTON_BACK) &&
+            (e.cbutton.button == SDL_CONTROLLER_BUTTON_LEFTSHOULDER || e.cbutton.button == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)) {
+            if (e.cbutton.button == SDL_CONTROLLER_BUTTON_LEFTSHOULDER) state_request_save(state_slot());   /* Back + LB = F5 */
+            else state_request_load(state_slot());                                                        /* Back + RB = F9 */
+            g_back_combo = 1;
+        }
+        if (e.type == SDL_CONTROLLERBUTTONDOWN && e.cbutton.button == SDL_CONTROLLER_BUTTON_BACK) g_back_combo = 0;
+        if (e.type == SDL_CONTROLLERBUTTONUP && e.cbutton.button == SDL_CONTROLLER_BUTTON_BACK && !g_back_combo)
+            g_select_pulse = 6;                                       /* a plain tap: Select for the game */
     }
     const Uint8 *k = SDL_GetKeyboardState(NULL);
     Uint64 freq = SDL_GetPerformanceFrequency(), period = freq * 1001 / 60000;   /* NTSC 59.94 Hz */
@@ -408,6 +436,7 @@ u16 platform_pad_buttons(void) {
     const Uint8 *k = SDL_GetKeyboardState(NULL);
     u16 b = scripted_buttons();
     if (ui_is_open()) return 0;   /* settings UI has the keyboard and pad */
+    if (g_select_pulse > 0) b |= 1 << 0;
     b |= mouse_pad_bits();
     if (k[SDL_SCANCODE_BACKSPACE] || k[SDL_SCANCODE_RSHIFT]) b |= 1 << 0;
     if (k[SDL_SCANCODE_RETURN]) b |= 1 << 3;
@@ -434,8 +463,12 @@ u16 platform_pad_buttons(void) {
             { SDL_CONTROLLER_BUTTON_Y, 12 }, { SDL_CONTROLLER_BUTTON_B, 13 },
             { SDL_CONTROLLER_BUTTON_A, 14 }, { SDL_CONTROLLER_BUTTON_X, 15 },
         };
-        for (unsigned i = 0; i < sizeof map / sizeof map[0]; i++)
+        int back = SDL_GameControllerGetButton(g_pad, SDL_CONTROLLER_BUTTON_BACK);
+        for (unsigned i = 0; i < sizeof map / sizeof map[0]; i++) {
+            if (back && (map[i].bit == 0 || map[i].bit == 5 || map[i].bit == 7 || map[i].bit == 10 || map[i].bit == 11))
+                continue;                                 /* Back combos (see g_back_combo) */
             if (SDL_GameControllerGetButton(g_pad, map[i].btn)) b |= 1 << map[i].bit;
+        }
         if (SDL_GameControllerGetAxis(g_pad, SDL_CONTROLLER_AXIS_TRIGGERLEFT) > 16000) b |= 1 << 8;
         if (SDL_GameControllerGetAxis(g_pad, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) > 16000) b |= 1 << 9;
     }

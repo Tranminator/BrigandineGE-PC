@@ -57,18 +57,22 @@ void platform_apply_display(void) {
     g_ui_grown = 0;
     SDL_SetWindowSize(g_win, 320 * g_settings.window_scale, 240 * g_settings.window_scale);
     SDL_SetWindowPosition(g_win, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-    if (ui_is_open()) platform_ui_window(1);          /* changed from the settings window: keep it usable */
+    if (ui_is_open()) platform_ui_window(1);          /* (shrinks back to the new size when it closes) */          /* changed from the settings window: keep it usable */
 }
-/* the settings window needs about 660x600: small windows grow while it is open, then shrink back */
+/* the settings window needs about 660x600: small windows grow while it is open and shrink back to the
+ * size they had when it closes, unless the player resized the window meanwhile (that size is kept) */
+static int g_pre_w, g_pre_h, g_grown_w, g_grown_h;
 void platform_ui_window(int open) {
     if (!g_win || g_settings.fullscreen) return;
     int w, h; SDL_GetWindowSize(g_win, &w, &h);
     if (open && (w < 660 || h < 600)) {
-        SDL_SetWindowSize(g_win, w < 660 ? 660 : w, h < 600 ? 600 : h);
+        g_pre_w = w; g_pre_h = h;
+        g_grown_w = w < 660 ? 660 : w; g_grown_h = h < 600 ? 600 : h;
+        SDL_SetWindowSize(g_win, g_grown_w, g_grown_h);
         g_ui_grown = 1;
     } else if (!open && g_ui_grown) {
         g_ui_grown = 0;
-        SDL_SetWindowSize(g_win, 320 * g_settings.window_scale, 240 * g_settings.window_scale);
+        if (w == g_grown_w && h == g_grown_h) SDL_SetWindowSize(g_win, g_pre_w, g_pre_h);
     }
 }
 

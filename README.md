@@ -67,7 +67,8 @@ spell or skill to read its description, click for the next page.
 In the MOVE / QUEST troop lists, Ctrl+click, Shift+click or middle click marks a troop (□ Select). Right click = × (back), middle click = △, wheel =
 up/down; on other screens left click = ○. Start: right click on a map with the free cursor (strategy or
 battle), or a side (back / forward) button anywhere. DOMAIN map: the box follows the mouse, click to jump
-there. Title screen: click
+there. Events: click for the next line, hold the left button to fast-forward (Square).
+Title screen: click
 for PUSH START BUTTON, point and click in the menu. SELECT RULER: push the mouse sideways (or the wheel) for
 the next ruler, click to pick. SAVE / LOAD: point at a file, click. UNITS list: push the mouse sideways for the other columns (without
 the game pointer: click the red corner arrows).

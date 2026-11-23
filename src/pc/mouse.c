@@ -28,6 +28,8 @@
  * Yes / No boxes (main func 800219B4): the pointer's x picks the answer. Unit status page 2 (main func
  * 8002F840): the pointer picks the attack / spell / skill described. Icon menus count only while the game
  * runs their input (main func 8002B940): their state outlives them, under SUMMON, STATUS...
+ * Events (main func 80032004 sets 0x800A69F4 while a script runs): holding the left button holds Square,
+ * the game's fast-forward.
  * Title screen (overlay 3): a click passes PUSH START BUTTON (Start), its menu is a list. SELECT RULER: a
  * sideways push or the wheel is Left / Right.
  * Also lists: UNITS (main func 80049AD4) and the memory card file boxes (main func 80045A74). DOMAIN
@@ -86,6 +88,8 @@
 #define RAM_LIST_VIS    0x800A6864u   /* visible rows */
 #define WIN_TABLE       0x800ACE28u
 #define RAM_FADE        0x800A67BCu   /* bit 3: screen fading, no input */
+#define RAM_EVENT       0x800A69F4u   /* 1 while an event script runs (set by main func 80032004) */
+#define FF_DELAY        20            /* frames the left button must be held before it fast-forwards */
 /* title screen (overlay 3, id 7, func 800B73F0): state 100 = PUSH START BUTTON (Start only), 110 = menu
  * NEWGAME / CONTINUE / TUTORIAL / RECOLLECTION, index in the generic list index; rows y 114 + 18 k */
 #define TITLE_OVL       7u
@@ -124,6 +128,9 @@ static int s_left, s_right, s_mid, s_wheel_up, s_wheel_down;   /* queued clicks 
 static int s_side;                         /* side (back / forward) button: Start */
 static double s_hpush;                     /* unit list: horizontal push towards the next / previous page */
 static int s_left_mod;                     /* the left click had Ctrl or Shift held */
+static int s_left_held;                    /* left button down now */
+static unsigned s_left_down;               /* frame it went down */
+static u16 s_ff_bits;                      /* event fast-forward: Square held */
 
 static double s_acc_x, s_acc_y;            /* captured movement not applied yet, display pixels */
 static int s_abs;                          /* OS pointer moved (not captured): s_vx/s_vy is absolute */
@@ -504,10 +511,14 @@ int mouse_event(const SDL_Event *e) {
         if (e->button.button == SDL_BUTTON_LEFT) {
             s_left++;
             s_left_mod = (SDL_GetModState() & (KMOD_CTRL | KMOD_SHIFT)) != 0;
+            s_left_held = 1; s_left_down = s_frame;
         }
         else if (e->button.button == SDL_BUTTON_RIGHT) s_right++;
         else if (e->button.button == SDL_BUTTON_MIDDLE) s_mid++;
         else if (e->button.button == SDL_BUTTON_X1 || e->button.button == SDL_BUTTON_X2) s_side++;
+        return 1;
+    case SDL_MOUSEBUTTONUP:
+        if (e->button.button == SDL_BUTTON_LEFT) s_left_held = 0;
         return 1;
     case SDL_MOUSEWHEEL:
         if (e->wheel.y > 0) s_wheel_up++;
@@ -551,6 +562,7 @@ static void edge_push(int l, int r, int u, int d, double mvx, double mvy, double
 static void update_capture(void) {
     if (getenv("BRIG_FAKE_CAPTURE")) { s_captured = 1; return; }   /* tests: behave as captured */
     SDL_Window *win = SDL_GetKeyboardFocus();
+    if (!win || ui_is_open()) s_left_held = 0;   /* the button-up may never arrive: never fast-forward on our own */
     int want = g_settings.mouse && g_settings.mouse_capture && win && !ui_is_open() && !getenv("BRIG_NO_CAPTURE");
     if (want == s_captured) return;
     if (want) {
@@ -575,6 +587,7 @@ void mouse_update(void) {
     update_capture();
     if (!g_settings.mouse) return;
     s_frame++;
+    if (!s_left_held || !g_settings.mouse) s_ff_bits = 0;
     /* movement is taken every frame; whatever arrives while busy is dropped, never replayed later */
     double mvx = s_acc_x, mvy = s_acc_y;
     s_acc_x = s_acc_y = 0;
@@ -594,6 +607,9 @@ void mouse_update(void) {
     int ctx = yn_active() ? 7 : sp_active() ? 8 : dom_active() ? 9 : ruler_active() ? 10 : list_active() ? 4 : grid_active() ? 6 : menu ? 2 : smap ? 5
             : battle && (mode == 0 || mode == 2) && rd8(RAM_CUR_COL) != 0xFF ? 1 : battle ? 3 : 0;   /* 0xFF: cursor hidden */
     if (!battle && !smap && ctx != 2 && ctx != 4 && ctx != 7 && ctx != 8 && ctx != 9 && ctx != 10) mode = ctx == 6 ? 100 + (int)(rd32(GRID_MODE) != 0) : -1;
+    /* events: holding the left button holds Square, the game's fast-forward (the click itself is Circle) */
+    if (s_left_held && rd32(RAM_EVENT) == 1 && s_frame - s_left_down >= FF_DELAY
+        && (ctx == 0 || ctx == 1 || ctx == 3 || ctx == 5)) s_ff_bits = B_SQUARE;
     /* edge hold: maps with the captured pointer only; a click, the OS pointer or another screen lets go */
     if (!((ctx == 1 || ctx == 5) && s_captured && !abs_move) || s_left || s_right || s_mid) s_edge_bits = 0;
     else edge_release(mvx, mvy);
@@ -963,4 +979,4 @@ void mouse_update(void) {
     else if (s_wheel_down) { s_wheel_down--; start_pulse(B_DOWN); }
 }
 
-u16 mouse_pad_bits(void) { return s_pulse_bits | s_edge_bits; }
+u16 mouse_pad_bits(void) { return s_pulse_bits | s_edge_bits | s_ff_bits; }

@@ -62,6 +62,7 @@ void state_cycle_slot(int dir) {
 }
 void state_request_save(int slot) { g_req_save = slot; }
 void state_request_load(int slot) { g_req_load = slot; }
+int state_load_pending(void) { return g_req_load >= 0; }
 void state_request_delete(int slot) { g_req_delete = slot; }
 int state_files_version(void) { return g_files_version; }
 

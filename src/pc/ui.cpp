@@ -298,6 +298,7 @@ static void tab_save(void) {
          "Memory card saves in the game's own menu still work and stay compatible with emulators.");
 
     const float th = 72.0f, tw = th * THUMB_W / THUMB_H;
+    const float pad = 6.0f, rh = th + 2 * pad;        /* row: thumbnail with a margin above and below */
     int last = -1;                                    /* newest save, manual or autosave: "Last saved" */
     for (int i = 0; i < NSLOTS; i++)
         if (s_slots[i].status == 1 && (last < 0 || s_slots[i].h.time > s_slots[last].h.time)) last = i;
@@ -311,7 +312,7 @@ static void tab_save(void) {
         bool selected = manual && v.slot == state_slot();
         /* the row keeps its highlight while the pointer is on its buttons too (the Selectable alone loses
          * hover there and the row blinks): draw it ourselves, the Selectable stays transparent */
-        ImVec2 p1(p0.x + ImGui::GetContentRegionAvail().x, p0.y + th);
+        ImVec2 p1(p0.x + ImGui::GetContentRegionAvail().x, p0.y + rh);
         bool row_hot = ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect(p0, p1);
         /* hover: a light fill only; which slot is what is told by text tags ("Last saved", "Selected") */
         if (row_hot) {
@@ -320,21 +321,24 @@ static void tab_save(void) {
         }
         ImGui::PushStyleColor(ImGuiCol_Header, 0); ImGui::PushStyleColor(ImGuiCol_HeaderHovered, 0);
         ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImGui::GetColorU32(ImGuiCol_HeaderActive));
-        if (ImGui::Selectable("##row", selected, ImGuiSelectableFlags_AllowOverlap, ImVec2(0, th)) && manual)
+        if (ImGui::Selectable("##row", selected, ImGuiSelectableFlags_AllowOverlap, ImVec2(0, rh)) && manual)
             state_set_slot(v.slot);
         ImGui::PopStyleColor(3);
-        ImGui::SetCursorScreenPos(p0);
+        ImVec2 after = ImGui::GetCursorScreenPos();       /* where the next row starts */
+        ImGui::SetCursorScreenPos(ImVec2(p0.x + pad, p0.y + pad));
         if (v.status == 1 && v.tex) ImGui::Image((ImTextureID)(intptr_t)v.tex, ImVec2(tw, th));
         else {
             ImVec2 a = ImGui::GetCursorScreenPos();
             ImGui::GetWindowDrawList()->AddRect(a, ImVec2(a.x + tw, a.y + th), ImGui::GetColorU32(ImGuiCol_Border), 3.0f);
             ImGui::Dummy(ImVec2(tw, th));
         }
-        ImGui::SameLine();
-        ImGui::BeginGroup();
+        /* the text block and the buttons are centred in the row */
         char name[32], l1[96], l2[96];
         state_slot_name(v.slot, name, sizeof name);
         slot_info(v, l1, l2, sizeof l1);
+        float lh = ImGui::GetTextLineHeightWithSpacing(), text_h = (l2[0] ? 3 : 2) * lh - ImGui::GetStyle().ItemSpacing.y;
+        ImGui::SetCursorScreenPos(ImVec2(p0.x + pad + tw + ImGui::GetStyle().ItemSpacing.x + 4, p0.y + (rh - text_h) * 0.5f));
+        ImGui::BeginGroup();
         ImGui::TextUnformatted(name);
         if (i == last) { ImGui::SameLine(); ImGui::TextColored(ImVec4(0.45f, 0.85f, 0.45f, 1.0f), "Last saved"); }
         if (selected) { ImGui::SameLine(); ImGui::TextColored(ImVec4(0.95f, 0.72f, 0.12f, 1.0f), "Selected"); }
@@ -342,10 +346,10 @@ static void tab_save(void) {
         if (l2[0]) ImGui::TextUnformatted(l2);
         ImGui::EndGroup();
 
-        float bw = 64.0f, right = ImGui::GetWindowContentRegionMax().x;
-        ImGui::SameLine(right - bw * 3 - 2 * ImGui::GetStyle().ItemSpacing.x - 12);   /* a little in from the row edge */
+        float bw = 64.0f;
+        ImGui::SetCursorScreenPos(ImVec2(p1.x - bw * 3 - 2 * ImGui::GetStyle().ItemSpacing.x - 12,   /* a little in from the edge */
+                                         p0.y + (rh - ImGui::GetFrameHeight()) * 0.5f));
         ImGui::BeginGroup();
-        ImGui::Dummy(ImVec2(0, th * 0.5f - ImGui::GetFrameHeight() * 0.5f - 14));
         if (manual) {
             if (ImGui::Button("Save", ImVec2(bw, 0))) {
                 state_set_slot(v.slot);
@@ -366,6 +370,8 @@ static void tab_save(void) {
         if (ImGui::Button("Delete", ImVec2(bw, 0))) { confirm_slot = v.slot; confirm_kind = 2; ImGui::OpenPopup("confirm"); }
         ImGui::EndDisabled();
         ImGui::EndGroup();
+        ImGui::SetCursorScreenPos(ImVec2(after.x, after.y - ImGui::GetStyle().ItemSpacing.y));
+        ImGui::Dummy(ImVec2(0, 0));                       /* ends the row; the next one starts at 'after' */
 
         if (ImGui::BeginPopupModal("confirm", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
             char nm[32]; state_slot_name(confirm_slot, nm, sizeof nm);

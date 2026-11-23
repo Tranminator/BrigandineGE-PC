@@ -67,8 +67,15 @@ spell or skill to read its description, click for the next page.
 In the MOVE / QUEST troop lists, Ctrl+click, Shift+click or middle click marks a troop (□ Select). Right click = × (back), middle click = △, wheel =
 up/down; on other screens left click = ○. Start: right click on a map with the free cursor (strategy or
 battle), or a side (back / forward) button anywhere. DOMAIN map: the box follows the mouse, click to jump
-there. SAVE / LOAD: point at a file, click. UNITS list: push the mouse sideways for the other columns (without
-the game pointer: click the red corner arrows).
+there. Events: click for the next line, hold the left button to fast-forward (Square); the
+same while the enemy moves on the battle map.
+Title screen: click
+for PUSH START BUTTON, point and click in the menu. SELECT RULER: push the mouse sideways (or the wheel) for
+the next ruler, click to pick. Organize EQUIP / ITEM: point at an item
+(push past the grid or use the wheel to scroll), click. NAME: point at a letter (or
+Kana / Eng. / Space / Cancel / Finish), click. SAVE / LOAD: point at a file, click. UNITS list: push the mouse sideways for the other columns
+(without the game pointer: click the red corner arrows); push above the first knight for the header row, where
+the mouse picks the column and a click sorts.
 
 `F5` quick save, `F9` quick load (see below). `F1` shows all of VRAM (debug). Hold `Tab` to fast-forward.
 

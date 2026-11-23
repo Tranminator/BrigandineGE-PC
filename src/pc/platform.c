@@ -199,6 +199,12 @@ static void inject_keys(void) {
             ev.type = SDL_MOUSEMOTION; ev.motion.xrel = atoi(name + 4);
             ev.motion.yrel = strchr(name, ';') ? atoi(strchr(name, ';') + 1) : 0;
             SDL_PushEvent(&ev);
+        } else if (f == frame && (!strncmp(name, "LDown", 5) || !strncmp(name, "LUp", 3))) {
+            /* scripted left button held / released (LClick is a press and release) */
+            SDL_Event ev; memset(&ev, 0, sizeof ev);
+            ev.type = name[1] == 'D' ? SDL_MOUSEBUTTONDOWN : SDL_MOUSEBUTTONUP;
+            ev.button.button = SDL_BUTTON_LEFT;
+            SDL_PushEvent(&ev);
         } else if (f == frame && (!strncmp(name, "LClick", 6) || !strncmp(name, "RBtn", 4) ||
                                   !strncmp(name, "MBtn", 4) || !strncmp(name, "CClick", 6) ||
                                   !strncmp(name, "XBtn", 4))) {
@@ -209,6 +215,7 @@ static void inject_keys(void) {
             ev.button.button = name[0] == 'R' ? SDL_BUTTON_RIGHT : name[0] == 'M' ? SDL_BUTTON_MIDDLE
                              : name[0] == 'X' ? SDL_BUTTON_X1 : SDL_BUTTON_LEFT;
             SDL_PushEvent(&ev);
+            ev.type = SDL_MOUSEBUTTONUP; SDL_PushEvent(&ev);
         } else if (f == frame && (!strncmp(name, "Move=", 5) || !strncmp(name, "Click=", 6) || !strncmp(name, "RClick=", 7))) {
             /* scripted mouse (window points): Move=x;y, Click=x;y, RClick=x;y */
             const char *xy = strchr(name, '=') + 1;
@@ -221,6 +228,7 @@ static void inject_keys(void) {
                 ev.type = SDL_MOUSEBUTTONDOWN; ev.button.x = mx; ev.button.y = my;
                 ev.button.button = name[0] == 'R' ? SDL_BUTTON_RIGHT : SDL_BUTTON_LEFT;
                 SDL_PushEvent(&ev);
+                ev.type = SDL_MOUSEBUTTONUP; SDL_PushEvent(&ev);
             }
         } else if (f == frame) {
             SDL_Event ev; memset(&ev, 0, sizeof ev);

@@ -10,3 +10,6 @@ ov1:0x800D09A0   # strategy: SUMMON monster list (state machine, runs every fram
 ov1:0x800C57D8   # strategy: DOMAIN overview map, per frame draw
 0x80045A74       # memory card save / load (state gp+3308, 40 = choosing a file)
 0x800257F8       # small menu input (OPTION...): a0 = last index, index 0x800A6948
+ov3:0x800B81EC   # title: SELECT RULER (new game), per frame
+ov1:0x800CA034   # strategy: item grid (Organize EQUIP / ITEM), per frame
+ov1:0x800CF8A8   # strategy: NAME letter grid, per frame

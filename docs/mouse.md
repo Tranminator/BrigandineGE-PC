@@ -1,6 +1,6 @@
-# Điều khiển bằng chuột
+# Điều khiển bằng chuột và tay cầm
 
-Ghi lại toàn bộ phần chuột của bản port PC (PR #8, #9, #11).
+Ghi lại toàn bộ phần chuột (PR #8, #9, #11, #13) và các phím tắt lưu trên tay cầm (PR #14) của bản port PC.
 
 ## Nguyên tắc
 
@@ -17,6 +17,7 @@ Ghi lại toàn bộ phần chuột của bản port PC (PR #8, #9, #11).
 | Pointer speed | Độ nhạy chuột khi bật Game pointer (5–100%; file cài đặt cho tới 200%) |
 
 - Chuột tự nhả ra khi mở F2 hoặc khi cửa sổ game mất focus.
+- Nút **?** cạnh ô Mouse control mở bảng tóm tắt cách dùng chuột.
 - **Cursor Speed** trong OPTION của game không ảnh hưởng tốc độ con trỏ chuột. Nó chỉ quyết định tốc độ cuộn bản đồ khi chuột ép vào mép (xem phần Bản đồ).
 
 ## Nút chuột chung
@@ -90,6 +91,23 @@ Ghi lại toàn bộ phần chuột của bản port PC (PR #8, #9, #11).
 | Hội thoại sự kiện | Click = qua câu. **Giữ chuột trái** khoảng 1/3 giây trở lên thì chuột giữ □: tua nhanh; thả ra là về tốc độ thường. |
 | Lượt địch trong trận | Giữ chuột trái = giữ □: tua nhanh. Hết lượt địch là tự nhả, không tua sang lượt của mình. |
 
+## Tay cầm
+
+Các nút tay cầm gán theo nút PS1 như bình thường: B = ○, A = ×, Y = △, X = □, LB / RB = L1 / R1, LT / RT = L2 / R2, Start / Back = Start / Select. Ngoài ra có các phím tắt cho hệ thống lưu của bản port, tất cả đều **giữ nút Back** rồi bấm thêm:
+
+| Tổ hợp | Tác dụng | Bàn phím tương ứng |
+|---|---|---|
+| Back + D-pad ← / → | Đổi slot lưu (vòng 1–10, góc màn hình báo slot đó đang chứa gì, slot được nhớ cho lần sau) | Shift trái + ← / → |
+| Back + LB | Lưu nhanh vào slot đang chọn | F5 |
+| Back + RB | Nạp nhanh từ slot đang chọn | F9 |
+| Bấm Back riêng (không kèm nút nào) | Select của game | Backspace |
+
+- Trong lúc giữ Back, game **không nhận** Select, ← / →, L1 / R1, nên đổi slot hay lưu / nạp không làm game phản ứng theo.
+- Ba slot autosave không chọn làm slot lưu nhanh được, chỉ nạp được bằng nút Load trong F2 → Save.
+- Mới thử bằng tay cầm ảo (`BRIG_VPAD`), chưa thử bằng tay cầm thật.
+
+Code: `src/pc/platform.c` (`g_back_combo`, `g_select_pulse`, bảng nút trong `platform_pad_buttons`).
+
 ## Ghi chú kỹ thuật (cho lần sửa sau)
 
 Code nằm ở `src/pc/mouse.c`. Mỗi màn được nhận ra qua một **hook** ở đầu hàm game: hàm nào đã chạy trong 2 khung hình gần nhất thì coi màn đó đang mở. Danh sách hook nằm trong `src/pc/hook_list.txt`; recompiler tự chèn `hook_f_<seg>_<addr>()`.
@@ -146,3 +164,6 @@ Các địa chỉ khác:
 
 - `BRIG_POKE="khung:addr=value"` ghi RAM. Ví dụ `poke_items.txt` nạp đủ vật phẩm để thử.
 - Biến môi trường để xem log: `BRIG_MOUSE_TRACE=1` (đổi context), `BRIG_RAMDUMP=khung,...` (chụp RAM).
+- Tay cầm ảo: `BRIG_VPAD=1`, rồi `PadDown=<số nút>` / `PadUp=<số nút>` trong danh sách phím (số theo `SDL_GameControllerButton`: Back 4, LB 9, RB 10, D-pad ← 13, → 14).
+- Menu F2: `BRIG_UI_TAB=0..4` mở sẵn một tab. Ảnh chụp 960×720 xem đủ độ phân giải bằng `mont1.py`.
+- Lưu ý: F9 nạp **slot đang chọn** trong file cài đặt thật (`~/Library/Application Support/PortGamePC/Brigandine/settings.cfg`), còn `run.sh` chỉ chép save state vào slot 1. Nếu slot đang chọn không phải 1 thì lệnh `400:F9` không nạp gì.

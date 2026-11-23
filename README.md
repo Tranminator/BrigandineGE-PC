@@ -73,7 +73,8 @@ Title screen: click
 for PUSH START BUTTON, point and click in the menu. SELECT RULER: push the mouse sideways (or the wheel) for
 the next ruler, click to pick. Organize EQUIP / ITEM: point at an item
 (push past the grid or use the wheel to scroll), click. NAME: point at a letter (or
-Kana / Eng. / Space / Cancel / Finish), click. SAVE / LOAD: point at a file, click. UNITS list: push the mouse sideways for the other columns (without
+Kana / Eng. / Space / Cancel / Finish), click. SAVE / LOAD: point at a file, click. UNITS list: push the mouse sideways for the other columns;
+push above the first knight for the header row, where the mouse picks the column and a click sorts (without
 the game pointer: click the red corner arrows).
 
 `F5` quick save, `F9` quick load (see below). `F1` shows all of VRAM (debug). Hold `Tab` to fast-forward.

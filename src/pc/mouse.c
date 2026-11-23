@@ -35,7 +35,7 @@
  * Organize EQUIP / ITEM item grid (strategy func 800CA034): 2 columns, the pointer picks the cell, pushing
  * past the top / bottom row scrolls.
  * Organize NAME letter grid (strategy func 800CF8A8): the pointer picks the letter, empty cells are skipped.
- * Also lists: UNITS (main func 80049AD4) and the memory card file boxes (main func 80045A74). DOMAIN
+ * Also lists: UNITS (main func 80049AD4; above the first knight is the header row, x picks the sort column) and the memory card file boxes (main func 80045A74). DOMAIN
  * overview map (strategy func 800C57D8): the box follows the pointer, a click jumps there. In the troop pickers Ctrl / Shift click
  * or middle click is Square (mark a troop; the game then moves to the next row, as with the pad).
  * Everywhere else: left = Circle, right = Cross, middle = Triangle, wheel = Up/Down. Start: the side
@@ -206,6 +206,31 @@ static GridLayout grid_layout(void) {
 #define RAM_UL_COUNT 0x800A6CDCu      /* s16 */
 #define RAM_UL_TOP   0x800A6CDEu      /* s16 */
 #define RAM_UL_ROW   0x800A6CE2u      /* s16, visible row 1..10, 0 = header */
+/* UNITS header row (sort): column s8 0x800A6CE0 (0 = Knights at x 32, 58 wide; column c > 0: x s16 at
+ * 0x8009DB00 + 12 * page + 2 * (c - 1), width u8 at 0x8009DB48 + 6 * page + c - 1), page s8 0x800A6CE8,
+ * last column of page p = (0x332564 >> 4p) & 15; boxes y 24..40. Circle sorts by the column. */
+#define RAM_UL_HCOL  0x800A6CE0u
+#define RAM_UL_PAGE  0x800A6CE8u
+static int s_ulh;                    /* the pointer is on the header row */
+static double s_ulh_x, s_ulh_push;
+static int ul_hcol_box(int c, double *x, double *w) {
+    int page = (s8)rd8(RAM_UL_PAGE);
+    if (page < 0 || page > 5 || c < 0 || c > ((0x332564 >> (4 * page)) & 15)) return 0;
+    if (c == 0) { *x = 32; *w = 58; return 1; }
+    *x = (s16)rd16(0x8009DB00u + (u32)(12 * page + 2 * (c - 1)));
+    *w = rd8(0x8009DB48u + (u32)(6 * page + c - 1));
+    return *w > 0;
+}
+static int ul_hcol_at(double px) {    /* the column under x, else the nearest */
+    int best = 0; double bd = 1e9, x, w;
+    for (int c = 0; c < 7; c++) {
+        if (!ul_hcol_box(c, &x, &w)) continue;
+        if (px >= x && px < x + w) return c;
+        double d = fabs(px - (x + w / 2));
+        if (d < bd) { bd = d; best = c; }
+    }
+    return best;
+}
 static unsigned s_ul_seen = 0x80000000u;
 void hook_f_main_80049AD4(Ctx *c) { (void)c; s_ul_seen = s_frame; }
 /* DOMAIN overview map (strategy overlay, drawn by func 800C57D8): a free box cursor, position in
@@ -1026,8 +1051,52 @@ void mouse_update(void) {
     } else if (ctx == 4) {                            /* scrolling list: the pointer walks the items */
         int cur = list_cur();
         if (s_ld.kind == 4) {                         /* unit list: Left / Right show other columns */
+            int row = (s16)rd16(RAM_UL_ROW);
+            if (row == 0 && !s_ulh) {                 /* the keyboard put it on the header */
+                double x, w; s_ulh = 1; s_ulh_push = 0;
+                s_ulh_x = ul_hcol_box((s8)rd8(RAM_UL_HCOL), &x, &w) ? x + w / 2 : 60;
+            }
+            if (row != 0) s_ulh = 0;
+            if (!s_ulh && s_moved && list_top() == 0 && cur == 0) {   /* above the first row: the header */
+                int up = abs_move ? (s_vy >= 22 && s_vy < s_ld.y) : (s_list_pos + mvy / s_ld.pitch < 0);
+                if (!abs_move && up) { s_ulh_push += mvy; up = s_ulh_push <= -12; } else if (!abs_move) s_ulh_push = 0;
+                if (up) {
+                    s_ulh = 1; s_ulh_push = 0; s_ulh_x = abs_move ? s_vx : 60;
+                    wr16(RAM_UL_ROW, 0);
+                }
+            }
+            if (s_ulh) {                              /* header: x picks the sort column, a click sorts */
+                int leave = 0;
+                if (s_wheel_down) { s_wheel_down = 0; leave = 1; }
+                s_wheel_up = 0;
+                if (s_moved) {
+                    if (abs_move) { if (s_vy >= s_ld.y) leave = 1; else s_ulh_x = s_vx; }
+                    else {
+                        s_ulh_x += mvx;
+                        if (s_ulh_x < 32) s_ulh_x = 32;
+                        if (s_ulh_x > 300) s_ulh_x = 300;
+                        s_ulh_push = mvy > 0 ? s_ulh_push + mvy : 0;
+                        if (s_ulh_push >= 12) leave = 1;
+                    }
+                }
+                if (leave) {                          /* back to the knights (the OS pointer: the one under it) */
+                    s_ulh = 0; s_ulh_push = 0;
+                    wr16(RAM_UL_ROW, 1); s_list_pos = list_top() + 0.5; s_list_wr = cur = list_top();
+                    if (!abs_move) { s_moved = 0; return; }
+                } else s_moved = 0;
+            }
+            if (s_ulh) {
+                int c = ul_hcol_at(s_ulh_x);
+                if ((s8)rd8(RAM_UL_HCOL) != c) wr8(RAM_UL_HCOL, (u8)c);
+                if (s_left) {
+                    s_left = 0;
+                    if ((abs_move || !s_captured) && !(s_vy >= 22 && s_vy < s_ld.y)) return;
+                    start_pulse(B_CIRCLE); s_cool = 20;
+                }
+                return;
+            }
             int dir = page_push(mvx, mvy, abs_move);
-            if (!dir && s_left && (abs_move || !s_captured) && s_vy >= 0 && s_vy < 45 && (s_vx < 60 || s_vx >= 260)) {
+            if (!dir && s_left && (abs_move || !s_captured) && s_vy >= 0 && s_vy < 22 && (s_vx < 60 || s_vx >= 260)) {
                 dir = s_vx < 60 ? -1 : 1;             /* OS pointer: the page arrows in the top corners */
                 s_left = 0;
             }

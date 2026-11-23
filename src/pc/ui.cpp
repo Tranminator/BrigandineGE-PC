@@ -310,11 +310,15 @@ static void tab_save(void) {
          * hover there and the row blinks): draw it ourselves, the Selectable stays transparent */
         ImVec2 p1(p0.x + ImGui::GetContentRegionAvail().x, p0.y + th);
         bool row_hot = ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect(p0, p1);
-        if (selected || row_hot) {
-            ImVec4 col = ImGui::GetStyleColorVec4(selected ? ImGuiCol_Header : ImGuiCol_HeaderHovered);
-            if (!selected) col.w *= 0.45f;            /* hover: lighter than the selected slot, buttons stay readable */
-            ImGui::GetWindowDrawList()->AddRectFilled(p0, p1, ImGui::GetColorU32(col), ImGui::GetStyle().FrameRounding);
+        /* hover: a light fill. The selected slot (F5 / F9 target) is marked apart from that: an accent
+         * outline and an "F5 / F9" tag, so it never looks like a stuck hover */
+        float rr = ImGui::GetStyle().FrameRounding;
+        if (row_hot) {
+            ImVec4 col = ImGui::GetStyleColorVec4(ImGuiCol_HeaderHovered); col.w *= 0.45f;
+            ImGui::GetWindowDrawList()->AddRectFilled(p0, p1, ImGui::GetColorU32(col), rr);
         }
+        if (selected)
+            ImGui::GetWindowDrawList()->AddRect(p0, p1, ImGui::GetColorU32(ImGuiCol_CheckMark), rr, 0, 2.0f);
         ImGui::PushStyleColor(ImGuiCol_Header, 0); ImGui::PushStyleColor(ImGuiCol_HeaderHovered, 0);
         ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImGui::GetColorU32(ImGuiCol_HeaderActive));
         if (ImGui::Selectable("##row", selected, ImGuiSelectableFlags_AllowOverlap, ImVec2(0, th)) && manual)
@@ -333,12 +337,16 @@ static void tab_save(void) {
         state_slot_name(v.slot, name, sizeof name);
         slot_info(v, l1, l2, sizeof l1);
         ImGui::TextUnformatted(name);
+        if (selected) {
+            ImGui::SameLine();
+            ImGui::TextColored(ImGui::GetStyleColorVec4(ImGuiCol_CheckMark), "F5 / F9");
+        }
         ImGui::TextDisabled("%s", l1);
         if (l2[0]) ImGui::TextUnformatted(l2);
         ImGui::EndGroup();
 
         float bw = 64.0f, right = ImGui::GetWindowContentRegionMax().x;
-        ImGui::SameLine(right - bw * 3 - 16);
+        ImGui::SameLine(right - bw * 3 - 2 * ImGui::GetStyle().ItemSpacing.x);   /* the last button ends at the row edge */
         ImGui::BeginGroup();
         ImGui::Dummy(ImVec2(0, th * 0.5f - ImGui::GetFrameHeight() * 0.5f - 4));
         if (manual) {

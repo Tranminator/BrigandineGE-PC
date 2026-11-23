@@ -64,7 +64,6 @@
 #define RAM_CAM_X       0x800A6794u   /* s32 */
 #define RAM_CAM_Z       0x800A6798u   /* s32 */
 #define RAM_INPUT_MODE  0x800A6994u   /* 0 free cursor, 1 menu open, 2 choosing a hex */
-#define RAM_SCREEN      0x800A69DCu   /* 2 = battle map (3 = unit status screen) */
 /* generic list menu (main EXE, $gp-relative) */
 #define RAM_MENU_INDEX  0x800A6950u   /* selected item */
 #define RAM_MENU_LAST   0x800A69E0u   /* index of the last item, -1 = no menu */
@@ -662,9 +661,11 @@ void mouse_update(void) {
     if (s_gap_frames > 0) { s_gap_frames--; s_moved = 0; return; }
 
     u32 ovl = rd32(OVL_ID_ADDR);
-    int battle = ovl == 6 && rd32(RAM_SCREEN) == 2;
-    int mode = (int)rd32(RAM_INPUT_MODE);
     u32 flags = rd32(RAM_UI_FLAGS);
+    /* battle map: a free cursor takes input (flag bit 0; clear on the unit status screen). Not 0x800A69DC:
+     * it only looks like a screen id (2 on the map, 3 on the status screen) and stays 3 after Next */
+    int battle = ovl == 6 && (flags & 1);
+    int mode = (int)rd32(RAM_INPUT_MODE);
     /* icon menu taking input: its state stays 2 after it closes and under the screens it opens
      * (SUMMON, STATUS...), so the game must also have run its menu input (hook) just now */
     int menu = (s32)rd32(RAM_MENU_LAST) >= 0 && rd32(RAM_MENU_STATE) == 2 && !(flags & 1) && s_frame - s_menu_seen <= 2;

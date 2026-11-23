@@ -316,7 +316,9 @@ static void tab_save(void) {
     int last = -1;                                    /* newest save, manual or autosave: "Last saved" */
     for (int i = 0; i < NSLOTS; i++)
         if (s_slots[i].status == 1 && (last < 0 || s_slots[i].h.time > s_slots[last].h.time)) last = i;
-    ImGui::BeginChild("slots", ImVec2(0, 380), ImGuiChildFlags_Borders);
+    /* the slot list takes the rest of the tab (the settings window follows the game window's height) */
+    float list_h = ImGui::GetContentRegionAvail().y;
+    ImGui::BeginChild("slots", ImVec2(0, list_h > 200 ? list_h : 200), ImGuiChildFlags_Borders);
     for (int i = 0; i < NSLOTS; i++) {
         SlotView &v = s_slots[i];
         bool manual = v.slot <= 10;

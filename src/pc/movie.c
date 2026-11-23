@@ -6,6 +6,7 @@
 #include "hle.h"
 #include "audio.h"
 #include "mdec.h"
+#include "state.h"
 #include <stdlib.h>
 
 #define MAX_W 640
@@ -77,6 +78,9 @@ void hle_strNext(Ctx *c) {
         if (platform_quit_requested()) exit(0);
         u16 btn = platform_pad_buttons();
         if (skippable && (btn & 0x08) && !(prev_btn & 0x08)) { skipped = 1; done = 1; }  /* Start */
+        /* a quick load (F9 ...) happens at the game's next VSync, which never comes while a movie
+         * plays: end the movie so the load is not held back until it finishes */
+        if (state_load_pending()) { skipped = skippable; done = 1; }
         prev_btn = btn;
     }
     platform_set_movie_frame(NULL, 0, 0);

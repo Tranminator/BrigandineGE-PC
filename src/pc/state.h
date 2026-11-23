@@ -45,6 +45,7 @@ typedef struct {
 /* requests from the UI / hotkeys, executed at the game's next VSync */
 void state_request_save(int slot);
 void state_request_load(int slot);
+int state_load_pending(void);      /* a load waits for the game's next VSync */
 void state_request_delete(int slot);
 int  state_slot(void);
 void state_set_slot(int slot);

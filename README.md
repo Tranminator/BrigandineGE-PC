@@ -47,6 +47,9 @@ The game needs Disc 2 for some story movies, and asks for it ("Insert disk 2"). 
 Disc 2 image in the drive by itself (a short "Disc 2 inserted" message) and the game goes on; nothing has to be
 done. Disc 2 is looked for at the Disc 1 path with "Disc 1" changed to "Disc 2" (that file, or the first `.bin`
 in that folder). Without it the game stays on "Insert disk 2".
+The port remembers which disc was in the drive when you last played and starts with that one, like leaving
+Disc 2 in a PlayStation: loading a Disc 2 save from the memory card then needs no disc check; only a Disc 1 save
+or a new game asks for Disc 1. Save states (F5 / F9) load on either disc.
 | PS1 | Keyboard | Controller |
 |---|---|---|
 | D-pad | Arrow keys | D-pad |

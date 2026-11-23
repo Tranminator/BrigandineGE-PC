@@ -12,6 +12,7 @@ typedef struct {
     int mouse_speed;              /* game pointer speed, percent of the OS pointer */
     int mouse_capture;            /* 1 = game pointer (mouse captured), 0 = OS pointer */
     int render_scale;             /* 1 = native software renderer, 2..8 = hardware renderer at N x */
+    int disc;                     /* disc in the drive at the last session (1 / 2): the next start boots it */
 } Settings;
 extern Settings g_settings;
 

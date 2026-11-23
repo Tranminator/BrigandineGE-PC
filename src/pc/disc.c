@@ -9,6 +9,7 @@
 #include <dirent.h>
 #include <string.h>
 #include <stdlib.h>
+#include "settings.h"
 
 static FILE *g_imgs[2];       /* Disc 1, Disc 2 (NULL: not found) */
 static FILE *g_disc;          /* the one "in the drive" */
@@ -56,7 +57,10 @@ int disc_open(const char *path) {
     if (!g_imgs[1]) find_disc2(path);
     rt_log("[disc] Disc 1: %s", g_paths[0]);
     rt_log("[disc] Disc 2: %s", g_imgs[1] ? g_paths[1] : "(not found)");
-    if (getenv("BRIG_START_DISC") && atoi(getenv("BRIG_START_DISC")) == 2) disc_select(1);   /* tests */
+    /* boot the disc of the last session (as if it were left in the drive); tests: BRIG_START_DISC=1/2 */
+    int start = getenv("BRIG_START_DISC") ? atoi(getenv("BRIG_START_DISC")) : g_settings.disc;
+    if (start == 2 && !g_imgs[1]) start = 1;
+    if (start == 2) { g_disc = g_imgs[1]; g_cur = 1; rt_log("[disc] starting with Disc 2 in the drive"); }
     return 1;
 }
 
@@ -68,6 +72,10 @@ int disc_select(int i) {
     if (i < 0 || i > 1 || !g_imgs[i]) return 0;
     if (i != g_cur) rt_log("[disc] Disc %d in the drive", i + 1);
     g_disc = g_imgs[i]; g_cur = i;
+    if (g_settings.disc != i + 1) {               /* remembered: the next start boots this disc */
+        g_settings.disc = i + 1;
+        if (!getenv("BRIG_STATE_DIR")) settings_save();   /* tests leave the real settings alone */
+    }
     return 1;
 }
 

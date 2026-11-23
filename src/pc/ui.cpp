@@ -104,6 +104,24 @@ static bool slider_pct(const char *label, int *v) {
     return ch;
 }
 
+/* mouse help, shown by the ? button next to "Mouse control" */
+static const char *MOUSE_HELP =
+    "The mouse drives the game's own cursor (one pointer). It is released while this window is open or the game is in the background.\n"
+    "\n"
+    "Buttons: left = Circle, right = Cross (back), middle = Triangle, wheel = Up / Down. Start = right click on a map with the free cursor, or a side button.\n"
+    "\n"
+    "- Battle map: move to a hex, click to select; attack / spell targets the same way.\n"
+    "- Strategy map: the quill follows the mouse, click a castle.\n"
+    "- Both maps: push against an edge to scroll; it keeps scrolling at the game's Cursor Speed until you move back.\n"
+    "- Menus, Organize grids, lists (attacks, magic, skills, SUMMON...): point, click; push past the end or use the wheel to scroll.\n"
+    "- Troop lists: Ctrl / Shift / middle click marks a troop.\n"
+    "- Yes / No: move left / right, click. Unit status: point at an attack / spell / skill to read it.\n"
+    "- Events: click for the next line, hold the left button to fast-forward (also during the enemy's battle turn).\n"
+    "- UNITS: push sideways for the other columns; above the first knight is the header row: pick a column, click to sort.\n"
+    "- DOMAIN: the box follows the mouse, click to jump. SAVE / LOAD: point at a file, click.\n"
+    "- EQUIP / ITEM: point at an item, click. NAME: point at a letter or command, click.\n"
+    "- Title: click for PUSH START, then point and click. SELECT RULER: push sideways or use the wheel.";
+
 static void hint(const char *t) {   /* wrapped, dimmed help text */
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
     ImGui::TextWrapped("%s", t);
@@ -199,6 +217,14 @@ static void tab_controls(void) {
     };
     bool m = g_settings.mouse != 0;
     if (ImGui::Checkbox("Mouse control", &m)) g_settings.mouse = m;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("?")) ImGui::OpenPopup("mouse_help");
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("How the mouse works");
+    ImGui::SetNextWindowSize(ImVec2(560, 0));
+    if (ImGui::BeginPopup("mouse_help")) {
+        ImGui::TextWrapped("%s", MOUSE_HELP);
+        ImGui::EndPopup();
+    }
     ImGui::BeginDisabled(!m);
     bool cap = g_settings.mouse_capture != 0;
     if (ImGui::Checkbox("Game pointer (captures the mouse)", &cap)) g_settings.mouse_capture = cap;
@@ -206,14 +232,6 @@ static void tab_controls(void) {
     ImGui::SliderInt("Pointer speed", &g_settings.mouse_speed, 5, 100, "%d%%");
     ImGui::EndDisabled();
     ImGui::EndDisabled();
-    hint("The mouse drives the game's own cursor (one pointer). Battle map: move to a hex, click to select, push "
-         "against a screen edge to scroll (keeps scrolling at the game's Cursor Speed until you move back); attack / spell targets the same way. Strategy map: the quill follows the "
-         "mouse, click a castle; in troop lists Ctrl / Shift / middle click marks a troop. Menus, Organize grids and lists (attacks, magic, "
-         "skills, SUMMON...): move up / down, click to choose, push past the end or use the wheel to scroll. Yes / No "
-         "boxes: move left / right, click to answer. Unit status: point at an attack / spell / skill to read it. Right click = Cross "
-         "(back), middle click = Triangle, wheel = Up / Down. Start = right click on a map (free cursor) or a side button. "
-         "DOMAIN: the box follows the mouse, click to jump there. Events: click for the next line, hold the left button to fast-forward (also during the enemy's battle turn). Title: click for PUSH START, then point and click. SELECT RULER: push sideways or use the wheel for the next ruler. EQUIP / ITEM: point at an item, click; push past the grid or use the wheel to scroll. NAME: point at a letter or command, click. SAVE / LOAD: point at a file, click. UNITS: push the mouse sideways for the other columns; above the first knight is the header row: pick a column, click to sort. The mouse is released while this window is open or "
-         "the game is in the background.");
     ImGui::Spacing();
     if (ImGui::BeginTable("keys", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {
         ImGui::TableSetupColumn("PS1"); ImGui::TableSetupColumn("Keyboard"); ImGui::TableSetupColumn("Controller");
@@ -280,6 +298,10 @@ static void tab_save(void) {
          "Memory card saves in the game's own menu still work and stay compatible with emulators.");
 
     const float th = 72.0f, tw = th * THUMB_W / THUMB_H;
+    const float pad = 6.0f, rh = th + 2 * pad;        /* row: thumbnail with a margin above and below */
+    int last = -1;                                    /* newest save, manual or autosave: "Last saved" */
+    for (int i = 0; i < NSLOTS; i++)
+        if (s_slots[i].status == 1 && (last < 0 || s_slots[i].h.time > s_slots[last].h.time)) last = i;
     ImGui::BeginChild("slots", ImVec2(0, 380), ImGuiChildFlags_Borders);
     for (int i = 0; i < NSLOTS; i++) {
         SlotView &v = s_slots[i];
@@ -288,29 +310,46 @@ static void tab_save(void) {
         ImGui::PushID(v.slot);
         ImVec2 p0 = ImGui::GetCursorScreenPos();
         bool selected = manual && v.slot == state_slot();
-        if (ImGui::Selectable("##row", selected, ImGuiSelectableFlags_AllowOverlap, ImVec2(0, th)) && manual)
+        /* the row keeps its highlight while the pointer is on its buttons too (the Selectable alone loses
+         * hover there and the row blinks): draw it ourselves, the Selectable stays transparent */
+        ImVec2 p1(p0.x + ImGui::GetContentRegionAvail().x, p0.y + rh);
+        bool row_hot = ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect(p0, p1);
+        /* hover: a light fill only; which slot is what is told by text tags ("Last saved", "Selected") */
+        if (row_hot) {
+            ImVec4 col = ImGui::GetStyleColorVec4(ImGuiCol_HeaderHovered); col.w *= 0.45f;
+            ImGui::GetWindowDrawList()->AddRectFilled(p0, p1, ImGui::GetColorU32(col), ImGui::GetStyle().FrameRounding);
+        }
+        ImGui::PushStyleColor(ImGuiCol_Header, 0); ImGui::PushStyleColor(ImGuiCol_HeaderHovered, 0);
+        ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImGui::GetColorU32(ImGuiCol_HeaderActive));
+        if (ImGui::Selectable("##row", selected, ImGuiSelectableFlags_AllowOverlap, ImVec2(0, rh)) && manual)
             state_set_slot(v.slot);
-        ImGui::SetCursorScreenPos(p0);
+        ImGui::PopStyleColor(3);
+        ImVec2 after = ImGui::GetCursorScreenPos();       /* where the next row starts */
+        ImGui::SetCursorScreenPos(ImVec2(p0.x + pad, p0.y + pad));
         if (v.status == 1 && v.tex) ImGui::Image((ImTextureID)(intptr_t)v.tex, ImVec2(tw, th));
         else {
             ImVec2 a = ImGui::GetCursorScreenPos();
             ImGui::GetWindowDrawList()->AddRect(a, ImVec2(a.x + tw, a.y + th), ImGui::GetColorU32(ImGuiCol_Border), 3.0f);
             ImGui::Dummy(ImVec2(tw, th));
         }
-        ImGui::SameLine();
-        ImGui::BeginGroup();
+        /* the text block and the buttons are centred in the row */
         char name[32], l1[96], l2[96];
         state_slot_name(v.slot, name, sizeof name);
         slot_info(v, l1, l2, sizeof l1);
+        float lh = ImGui::GetTextLineHeightWithSpacing(), text_h = (l2[0] ? 3 : 2) * lh - ImGui::GetStyle().ItemSpacing.y;
+        ImGui::SetCursorScreenPos(ImVec2(p0.x + pad + tw + ImGui::GetStyle().ItemSpacing.x + 4, p0.y + (rh - text_h) * 0.5f));
+        ImGui::BeginGroup();
         ImGui::TextUnformatted(name);
+        if (i == last) { ImGui::SameLine(); ImGui::TextColored(ImVec4(0.45f, 0.85f, 0.45f, 1.0f), "Last saved"); }
+        if (selected) { ImGui::SameLine(); ImGui::TextColored(ImVec4(0.95f, 0.72f, 0.12f, 1.0f), "Selected"); }
         ImGui::TextDisabled("%s", l1);
         if (l2[0]) ImGui::TextUnformatted(l2);
         ImGui::EndGroup();
 
-        float bw = 64.0f, right = ImGui::GetWindowContentRegionMax().x;
-        ImGui::SameLine(right - bw * 3 - 16);
+        float bw = 64.0f;
+        ImGui::SetCursorScreenPos(ImVec2(p1.x - bw * 3 - 2 * ImGui::GetStyle().ItemSpacing.x - 12,   /* a little in from the edge */
+                                         p0.y + (rh - ImGui::GetFrameHeight()) * 0.5f));
         ImGui::BeginGroup();
-        ImGui::Dummy(ImVec2(0, th * 0.5f - ImGui::GetFrameHeight() * 0.5f - 4));
         if (manual) {
             if (ImGui::Button("Save", ImVec2(bw, 0))) {
                 state_set_slot(v.slot);
@@ -331,6 +370,8 @@ static void tab_save(void) {
         if (ImGui::Button("Delete", ImVec2(bw, 0))) { confirm_slot = v.slot; confirm_kind = 2; ImGui::OpenPopup("confirm"); }
         ImGui::EndDisabled();
         ImGui::EndGroup();
+        ImGui::SetCursorScreenPos(ImVec2(after.x, after.y - ImGui::GetStyle().ItemSpacing.y));
+        ImGui::Dummy(ImVec2(0, 0));                       /* ends the row; the next one starts at 'after' */
 
         if (ImGui::BeginPopupModal("confirm", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
             char nm[32]; state_slot_name(confirm_slot, nm, sizeof nm);

@@ -439,19 +439,30 @@ extern "C" void ui_frame(void) {
     if (cursor) cursor_overlay(cx, cy);
     if (s_open) {
         ImGuiIO &io = ImGui::GetIO();
+        /* a tab's content: the space between the tab bar and the footer, scrolling when taller */
+        auto tab_body = [](void (*fn)(void)) {
+            float footer = ImGui::GetStyle().ItemSpacing.y * 2 + ImGui::GetTextLineHeightWithSpacing() + 2;
+            ImGui::BeginChild("tab_body", ImVec2(0, -footer));
+            fn();
+            ImGui::EndChild();
+        };
         ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-        ImGui::SetNextWindowSize(ImVec2(620, 0), ImGuiCond_Always);
+        /* fixed size: the game window's (or the screen's) height less a margin, so switching tabs never
+         * makes it jump; a tab taller than that scrolls inside, tabs and footer stay put */
+        const float margin = 16.0f;
+        float sw = io.DisplaySize.x - 2 * margin, sh = io.DisplaySize.y - 2 * margin;
+        ImGui::SetNextWindowSize(ImVec2(sw < 620 ? sw : 620, sh), ImGuiCond_Always);
         bool keep = true;
         if (ImGui::Begin("Settings", &keep, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize)) {
             if (ImGui::BeginTabBar("tabs")) {
                 static int want = -2;   /* debug: BRIG_UI_TAB=0/1/2 preselects a tab (screenshots) */
                 if (want == -2) { const char *e = getenv("BRIG_UI_TAB"); want = e ? atoi(e) : -1; }
                 auto sel = [&](int i) { ImGuiTabItemFlags f = want == i ? ImGuiTabItemFlags_SetSelected : 0; return f; };
-                if (ImGui::BeginTabItem("Graphics", nullptr, sel(0))) { tab_graphics(); ImGui::EndTabItem(); }
-                if (ImGui::BeginTabItem("Sound", nullptr, sel(1))) { tab_sound(); ImGui::EndTabItem(); }
-                if (ImGui::BeginTabItem("Controls", nullptr, sel(2))) { tab_controls(); ImGui::EndTabItem(); }
-                if (ImGui::BeginTabItem("Save", nullptr, sel(3))) { tab_save(); ImGui::EndTabItem(); }
-                if (ImGui::BeginTabItem("System", nullptr, sel(4))) { tab_system(); ImGui::EndTabItem(); }
+                if (ImGui::BeginTabItem("Graphics", nullptr, sel(0))) { tab_body(tab_graphics); ImGui::EndTabItem(); }
+                if (ImGui::BeginTabItem("Sound", nullptr, sel(1))) { tab_body(tab_sound); ImGui::EndTabItem(); }
+                if (ImGui::BeginTabItem("Controls", nullptr, sel(2))) { tab_body(tab_controls); ImGui::EndTabItem(); }
+                if (ImGui::BeginTabItem("Save", nullptr, sel(3))) { tab_body(tab_save); ImGui::EndTabItem(); }
+                if (ImGui::BeginTabItem("System", nullptr, sel(4))) { tab_body(tab_system); ImGui::EndTabItem(); }
                 want = -1;
                 ImGui::EndTabBar();
             }

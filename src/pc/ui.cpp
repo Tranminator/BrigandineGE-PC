@@ -212,7 +212,7 @@ static void tab_controls(void) {
         { "D-pad", "Arrow keys", "D-pad" }, { "Circle (confirm)", "X", "B" }, { "Cross (cancel)", "Z", "A" },
         { "Triangle", "S", "Y" }, { "Square", "A", "X" }, { "L1 / R1", "Q / E", "LB / RB" },
         { "L2 / R2", "1 / 3", "LT / RT" }, { "Start / Select", "Enter / Backspace", "Start / Back" },
-        { "Fast-forward (hold)", "Tab", "" }, { "Quick save / load", "F5 / F9", "" }, { "Change save slot", "Left Shift + Left / Right", "" },
+        { "Fast-forward (hold)", "Tab", "" }, { "Quick save / load", "F5 / F9", "" }, { "Change save slot", "Left Shift + Left / Right", "Back + D-pad L / R" },
         { "This window", "F2", "" },
     };
     bool m = g_settings.mouse != 0;

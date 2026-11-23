@@ -139,6 +139,10 @@ static void tab_graphics(void) {
     int fs = g_settings.frameskip;
     if (ImGui::Combo("Frame skip", &fs, skip_names, IM_ARRAYSIZE(skip_names))) g_settings.frameskip = fs;
     hint("Skips drawing on slow machines so the game keeps its normal speed.");
+    static const char *fit_names[] = { "Original (4:3)", "Integer scale", "Stretch" };
+    ImGui::Combo("Screen fit", &g_settings.screen_fit, fit_names, IM_ARRAYSIZE(fit_names));
+    hint("F3 switches in game. Original: the 4:3 picture as large as fits. Integer: whole multiples of 320x240, "
+         "sharp and even pixels (a border may remain). Stretch: fills the window.");
 
     ImGui::SeparatorText("Renderer");
     {
@@ -213,7 +217,7 @@ static void tab_controls(void) {
         { "Triangle", "S", "Y" }, { "Square", "A", "X" }, { "L1 / R1", "Q / E", "LB / RB" },
         { "L2 / R2", "1 / 3", "LT / RT" }, { "Start / Select", "Enter / Backspace", "Start / Back" },
         { "Fast-forward (hold)", "Tab", "" }, { "Quick save / load", "F5 / F9", "Back + LB / RB" }, { "Change save slot", "Left Shift + Left / Right", "Back + D-pad L / R" },
-        { "This window", "F2", "" },
+        { "Screen fit (original / integer / stretch)", "F3", "" }, { "This window", "F2", "" },
     };
     bool m = g_settings.mouse != 0;
     if (ImGui::Checkbox("Mouse control", &m)) g_settings.mouse = m;

@@ -62,7 +62,9 @@ int platform_init(const char *title) {
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 0);
-    g_win = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 960, 720,
+    int win_w = 960, win_h = 720;   /* tests: BRIG_WINDOW=WxH */
+    if (getenv("BRIG_WINDOW")) sscanf(getenv("BRIG_WINDOW"), "%dx%d", &win_w, &win_h);
+    g_win = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, win_w, win_h,
                              SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_OPENGL);
     if (!g_win) { rt_log("[video] window: %s", SDL_GetError()); return 0; }
     g_gl_ok = vgl_init(g_win);
@@ -151,10 +153,15 @@ static void present(int skipped) {
     else if (!skipped || g_movie_rgb || g_show_vram || !g_tex_w || g_hw_on) upload_frame();
     int ow, oh;
     vgl_drawable_size(&ow, &oh);
-    /* 4:3 (or VRAM 2:1) image, letterboxed in the window */
+    /* screen fit (F3): original 4:3 letterboxed in the window, integer multiples of 320x240 (sharp,
+     * even pixels; falls back to 4:3 when the window is smaller than 320x240), or stretched over it */
     double aspect = g_show_vram ? 2.0 : 4.0 / 3.0;
     int dw = ow, dh = (int)(ow / aspect);
     if (dh > oh) { dh = oh; dw = (int)(oh * aspect); }
+    if (!g_show_vram && g_settings.screen_fit == 1) {
+        int k = ow / 320 < oh / 240 ? ow / 320 : oh / 240;
+        if (k >= 1) { dw = 320 * k; dh = 240 * k; }
+    } else if (!g_show_vram && g_settings.screen_fit == 2) { dw = ow; dh = oh; }
     vgl_draw((ow - dw) / 2, (oh - dh) / 2, dw, dh);
     {   int ww, wh; SDL_GetWindowSize(g_win, &ww, &wh);
         mouse_set_view((ow - dw) / 2, (oh - dh) / 2, dw, dh, ww ? (float)ow / ww : 1.0f); }
@@ -325,6 +332,12 @@ void platform_vblank(void) {
             if (kc == SDLK_UP || kc == SDLK_DOWN || kc == SDLK_LEFT || kc == SDLK_RIGHT) mouse_cancel();
         }
         if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_F1) g_show_vram ^= 1;
+        if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.sym == SDLK_F3) {   /* screen fit, like RetroArch */
+            static const char *names[] = { "Screen: original 4:3", "Screen: integer scale", "Screen: stretch" };
+            g_settings.screen_fit = (g_settings.screen_fit + 1) % 3;
+            if (!getenv("BRIG_STATE_DIR")) settings_save();
+            ui_toast(names[g_settings.screen_fit]);
+        }
         if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.sym == SDLK_F5) state_request_save(state_slot());
         if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.sym == SDLK_F9) state_request_load(state_slot());
         if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.sym == SDLK_F10 && g_hw_on) {

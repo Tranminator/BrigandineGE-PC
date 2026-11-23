@@ -14,6 +14,8 @@ extern "C" {
 #include "settings.h"
 #include "state.h"
 void platform_apply_video(void);
+void platform_apply_display(void);
+void platform_ui_window(int open);
 }
 #include <time.h>
 
@@ -78,12 +80,12 @@ static void toast_overlay(void) {
     ImGui::End();
 }
 
-static void close_ui(void) { s_open = false; settings_save(); vgl_save_config(); }
+static void close_ui(void) { s_open = false; settings_save(); vgl_save_config(); platform_ui_window(0); }
 
 extern "C" int ui_event(const SDL_Event *e) {
     if (!s_ready) return 0;
     if (e->type == SDL_KEYDOWN && !e->key.repeat) {
-        if (e->key.keysym.sym == SDLK_F2) { if (s_open) close_ui(); else s_open = true; return 1; }
+        if (e->key.keysym.sym == SDLK_F2) { if (s_open) close_ui(); else { s_open = true; platform_ui_window(1); } return 1; }
         if (s_open && e->key.keysym.sym == SDLK_ESCAPE) { close_ui(); return 1; }
     }
     ImGui_ImplSDL2_ProcessEvent(e);
@@ -139,6 +141,18 @@ static void tab_graphics(void) {
     int fs = g_settings.frameskip;
     if (ImGui::Combo("Frame skip", &fs, skip_names, IM_ARRAYSIZE(skip_names))) g_settings.frameskip = fs;
     hint("Skips drawing on slow machines so the game keeps its normal speed.");
+    static const char *disp_names[] = { "Window", "Fullscreen" };
+    if (ImGui::Combo("Display", &g_settings.fullscreen, disp_names, IM_ARRAYSIZE(disp_names))) platform_apply_display();
+    ImGui::BeginDisabled(g_settings.fullscreen != 0);
+    static const char *size_names[] = { "1x (320x240, original size)", "2x (640x480)", "3x (960x720, default)", "4x (1280x960)" };
+    int ws = g_settings.window_scale - 1;
+    if (ImGui::Combo("Window size", &ws, size_names, IM_ARRAYSIZE(size_names))) { g_settings.window_scale = ws + 1; platform_apply_display(); }
+    ImGui::EndDisabled();
+    hint("At 1x and 2x the window grows while this settings window is open, and shrinks back when it closes.");
+    static const char *fit_names[] = { "Original (4:3)", "Integer scale", "Stretch", "Native 1x (320x240)" };
+    ImGui::Combo("Screen fit", &g_settings.screen_fit, fit_names, IM_ARRAYSIZE(fit_names));
+    hint("F3 switches in game. Original: the 4:3 picture as large as fits. Integer: whole multiples of 320x240, "
+         "sharp and even pixels (a border may remain). Stretch: fills the window. Native 1x: the original 320x240, centred.");
 
     ImGui::SeparatorText("Renderer");
     {
@@ -213,7 +227,7 @@ static void tab_controls(void) {
         { "Triangle", "S", "Y" }, { "Square", "A", "X" }, { "L1 / R1", "Q / E", "LB / RB" },
         { "L2 / R2", "1 / 3", "LT / RT" }, { "Start / Select", "Enter / Backspace", "Start / Back" },
         { "Fast-forward (hold)", "Tab", "" }, { "Quick save / load", "F5 / F9", "Back + LB / RB" }, { "Change save slot", "Left Shift + Left / Right", "Back + D-pad L / R" },
-        { "This window", "F2", "" },
+        { "Screen fit (original / integer / stretch / 1x)", "F3", "" }, { "This window", "F2", "" },
     };
     bool m = g_settings.mouse != 0;
     if (ImGui::Checkbox("Mouse control", &m)) g_settings.mouse = m;
@@ -302,7 +316,9 @@ static void tab_save(void) {
     int last = -1;                                    /* newest save, manual or autosave: "Last saved" */
     for (int i = 0; i < NSLOTS; i++)
         if (s_slots[i].status == 1 && (last < 0 || s_slots[i].h.time > s_slots[last].h.time)) last = i;
-    ImGui::BeginChild("slots", ImVec2(0, 380), ImGuiChildFlags_Borders);
+    /* the slot list takes the rest of the tab (the settings window follows the game window's height) */
+    float list_h = ImGui::GetContentRegionAvail().y;
+    ImGui::BeginChild("slots", ImVec2(0, list_h > 200 ? list_h : 200), ImGuiChildFlags_Borders);
     for (int i = 0; i < NSLOTS; i++) {
         SlotView &v = s_slots[i];
         bool manual = v.slot <= 10;
@@ -425,19 +441,30 @@ extern "C" void ui_frame(void) {
     if (cursor) cursor_overlay(cx, cy);
     if (s_open) {
         ImGuiIO &io = ImGui::GetIO();
+        /* a tab's content: the space between the tab bar and the footer, scrolling when taller */
+        auto tab_body = [](void (*fn)(void)) {
+            float footer = ImGui::GetStyle().ItemSpacing.y * 2 + ImGui::GetTextLineHeightWithSpacing() + 2;
+            ImGui::BeginChild("tab_body", ImVec2(0, -footer));
+            fn();
+            ImGui::EndChild();
+        };
         ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-        ImGui::SetNextWindowSize(ImVec2(620, 0), ImGuiCond_Always);
+        /* fixed size: the game window's (or the screen's) height less a margin, so switching tabs never
+         * makes it jump; a tab taller than that scrolls inside, tabs and footer stay put */
+        const float margin = 16.0f;
+        float sw = io.DisplaySize.x - 2 * margin, sh = io.DisplaySize.y - 2 * margin;
+        ImGui::SetNextWindowSize(ImVec2(sw < 620 ? sw : 620, sh), ImGuiCond_Always);
         bool keep = true;
         if (ImGui::Begin("Settings", &keep, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize)) {
             if (ImGui::BeginTabBar("tabs")) {
                 static int want = -2;   /* debug: BRIG_UI_TAB=0/1/2 preselects a tab (screenshots) */
                 if (want == -2) { const char *e = getenv("BRIG_UI_TAB"); want = e ? atoi(e) : -1; }
                 auto sel = [&](int i) { ImGuiTabItemFlags f = want == i ? ImGuiTabItemFlags_SetSelected : 0; return f; };
-                if (ImGui::BeginTabItem("Graphics", nullptr, sel(0))) { tab_graphics(); ImGui::EndTabItem(); }
-                if (ImGui::BeginTabItem("Sound", nullptr, sel(1))) { tab_sound(); ImGui::EndTabItem(); }
-                if (ImGui::BeginTabItem("Controls", nullptr, sel(2))) { tab_controls(); ImGui::EndTabItem(); }
-                if (ImGui::BeginTabItem("Save", nullptr, sel(3))) { tab_save(); ImGui::EndTabItem(); }
-                if (ImGui::BeginTabItem("System", nullptr, sel(4))) { tab_system(); ImGui::EndTabItem(); }
+                if (ImGui::BeginTabItem("Graphics", nullptr, sel(0))) { tab_body(tab_graphics); ImGui::EndTabItem(); }
+                if (ImGui::BeginTabItem("Sound", nullptr, sel(1))) { tab_body(tab_sound); ImGui::EndTabItem(); }
+                if (ImGui::BeginTabItem("Controls", nullptr, sel(2))) { tab_body(tab_controls); ImGui::EndTabItem(); }
+                if (ImGui::BeginTabItem("Save", nullptr, sel(3))) { tab_body(tab_save); ImGui::EndTabItem(); }
+                if (ImGui::BeginTabItem("System", nullptr, sel(4))) { tab_body(tab_system); ImGui::EndTabItem(); }
                 want = -1;
                 ImGui::EndTabBar();
             }

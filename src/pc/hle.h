@@ -9,6 +9,8 @@ u16  platform_pad_buttons(void);  /* PS1 layout, active-high */
 int  platform_quit_requested(void);
 void platform_set_movie_frame(const u8 *rgb, int w, int h); /* NULL = back to VRAM */
 void platform_apply_video(void);  /* VSync setting changed */
+void platform_apply_display(void);   /* window / fullscreen or window size changed */
+void platform_ui_window(int open);   /* settings window opened / closed: small windows grow for it */
 
 /* disc.c */
 int  disc_open(const char *bin_path);          /* Disc 1 (Disc 2 is looked for next to it) */

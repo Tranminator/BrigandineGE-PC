@@ -46,6 +46,36 @@ void platform_set_movie_frame(const u8 *rgb, int w, int h) { g_movie_rgb = rgb; 
 
 /* Apply VSync setting. With a ~60 Hz display and VSync on, presenting is the frame clock;
  * otherwise we sleep to 59.94 Hz ourselves (VSync off = best for VRR displays). */
+/* Window / fullscreen and the window size (F2 > Graphics). Fullscreen uses the desktop resolution; the
+ * picture inside follows the screen fit. Leaving fullscreen restores the chosen window size. */
+static int g_ui_grown;        /* the window was enlarged for the settings window (1x / 2x sizes) */
+void platform_ui_window(int open);
+void platform_apply_display(void) {
+    if (!g_win) return;
+    if (g_settings.fullscreen) { SDL_SetWindowFullscreen(g_win, SDL_WINDOW_FULLSCREEN_DESKTOP); return; }
+    SDL_SetWindowFullscreen(g_win, 0);
+    g_ui_grown = 0;
+    SDL_SetWindowSize(g_win, 320 * g_settings.window_scale, 240 * g_settings.window_scale);
+    SDL_SetWindowPosition(g_win, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    if (ui_is_open()) platform_ui_window(1);          /* (shrinks back to the new size when it closes) */          /* changed from the settings window: keep it usable */
+}
+/* the settings window needs about 660x600: small windows grow while it is open and shrink back to the
+ * size they had when it closes, unless the player resized the window meanwhile (that size is kept) */
+static int g_pre_w, g_pre_h, g_grown_w, g_grown_h;
+void platform_ui_window(int open) {
+    if (!g_win || g_settings.fullscreen) return;
+    int w, h; SDL_GetWindowSize(g_win, &w, &h);
+    if (open && (w < 660 || h < 600)) {
+        g_pre_w = w; g_pre_h = h;
+        g_grown_w = w < 660 ? 660 : w; g_grown_h = h < 600 ? 600 : h;
+        SDL_SetWindowSize(g_win, g_grown_w, g_grown_h);
+        g_ui_grown = 1;
+    } else if (!open && g_ui_grown) {
+        g_ui_grown = 0;
+        if (w == g_grown_w && h == g_grown_h) SDL_SetWindowSize(g_win, g_pre_w, g_pre_h);
+    }
+}
+
 void platform_apply_video(void) {
     if (!g_gl_ok) return;
     vgl_set_vsync(g_settings.vsync);
@@ -62,9 +92,12 @@ int platform_init(const char *title) {
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 0);
-    g_win = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 960, 720,
+    int win_w = 320 * g_settings.window_scale, win_h = 240 * g_settings.window_scale;   /* tests: BRIG_WINDOW=WxH */
+    if (getenv("BRIG_WINDOW")) sscanf(getenv("BRIG_WINDOW"), "%dx%d", &win_w, &win_h);
+    g_win = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, win_w, win_h,
                              SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_OPENGL);
     if (!g_win) { rt_log("[video] window: %s", SDL_GetError()); return 0; }
+    if (g_settings.fullscreen) SDL_SetWindowFullscreen(g_win, SDL_WINDOW_FULLSCREEN_DESKTOP);
     g_gl_ok = vgl_init(g_win);
     if (!g_gl_ok) { rt_log("[video] OpenGL 3.3 is required: %s", SDL_GetError()); return 0; }
     SDL_DisplayMode dm;
@@ -151,10 +184,22 @@ static void present(int skipped) {
     else if (!skipped || g_movie_rgb || g_show_vram || !g_tex_w || g_hw_on) upload_frame();
     int ow, oh;
     vgl_drawable_size(&ow, &oh);
-    /* 4:3 (or VRAM 2:1) image, letterboxed in the window */
+    /* screen fit (F3): original 4:3 letterboxed in the window, integer multiples of 320x240 (sharp,
+     * even pixels; falls back to 4:3 when the window is smaller than 320x240), stretched over it, or
+     * native 1x (320x240, centred) */
     double aspect = g_show_vram ? 2.0 : 4.0 / 3.0;
     int dw = ow, dh = (int)(ow / aspect);
     if (dh > oh) { dh = oh; dw = (int)(oh * aspect); }
+    if (!g_show_vram && g_settings.screen_fit == 1) {
+        int k = ow / 320 < oh / 240 ? ow / 320 : oh / 240;
+        if (k >= 1) { dw = 320 * k; dh = 240 * k; }
+    } else if (!g_show_vram && g_settings.screen_fit == 2) { dw = ow; dh = oh; }
+    else if (!g_show_vram && g_settings.screen_fit == 3) {   /* native 1x: 320x240 window points, centred */
+        int ww, wh; SDL_GetWindowSize(g_win, &ww, &wh);
+        double px = ww ? (double)ow / ww : 1.0;               /* drawable pixels per point (Retina: 2) */
+        int nw = (int)(320 * px + 0.5), nh = (int)(240 * px + 0.5);
+        if (nw <= ow && nh <= oh) { dw = nw; dh = nh; }
+    }
     vgl_draw((ow - dw) / 2, (oh - dh) / 2, dw, dh);
     {   int ww, wh; SDL_GetWindowSize(g_win, &ww, &wh);
         mouse_set_view((ow - dw) / 2, (oh - dh) / 2, dw, dh, ww ? (float)ow / ww : 1.0f); }
@@ -325,6 +370,13 @@ void platform_vblank(void) {
             if (kc == SDLK_UP || kc == SDLK_DOWN || kc == SDLK_LEFT || kc == SDLK_RIGHT) mouse_cancel();
         }
         if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_F1) g_show_vram ^= 1;
+        if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.sym == SDLK_F3) {   /* screen fit, like RetroArch */
+            static const char *names[] = { "Screen: original 4:3", "Screen: integer scale", "Screen: stretch",
+                                           "Screen: native 1x (320x240)" };
+            g_settings.screen_fit = (g_settings.screen_fit + 1) % 4;
+            if (!getenv("BRIG_STATE_DIR")) settings_save();
+            ui_toast(names[g_settings.screen_fit]);
+        }
         if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.sym == SDLK_F5) state_request_save(state_slot());
         if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.sym == SDLK_F9) state_request_load(state_slot());
         if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.sym == SDLK_F10 && g_hw_on) {

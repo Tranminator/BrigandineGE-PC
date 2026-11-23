@@ -19,8 +19,9 @@
 
 static SDL_Window *g_win;
 static SDL_GameController *g_pad;
-/* controller: Back held + D-pad Left / Right changes the save slot (like Left Shift + arrows). While
- * Back is held the game gets neither Select nor Left / Right; a Back tap without a combo is Select. */
+/* controller: Back held + D-pad Left / Right changes the save slot (like Left Shift + arrows), Back + LB
+ * quick saves (F5), Back + RB quick loads (F9). While Back is held the game gets neither Select nor
+ * Left / Right / L1 / R1; a Back tap without a combo is Select. */
 static int g_back_combo;      /* a slot change happened during this Back press */
 static int g_select_pulse;    /* frames of Select still to send after a plain Back tap */
 static SDL_Joystick *g_vjoy; /* tests (BRIG_VPAD): virtual controller */
@@ -355,6 +356,12 @@ void platform_vblank(void) {
             state_cycle_slot(e.cbutton.button == SDL_CONTROLLER_BUTTON_DPAD_LEFT ? -1 : 1);   /* Back + D-pad: save slot */
             g_back_combo = 1;
         }
+        if (e.type == SDL_CONTROLLERBUTTONDOWN && g_pad && SDL_GameControllerGetButton(g_pad, SDL_CONTROLLER_BUTTON_BACK) &&
+            (e.cbutton.button == SDL_CONTROLLER_BUTTON_LEFTSHOULDER || e.cbutton.button == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)) {
+            if (e.cbutton.button == SDL_CONTROLLER_BUTTON_LEFTSHOULDER) state_request_save(state_slot());   /* Back + LB = F5 */
+            else state_request_load(state_slot());                                                        /* Back + RB = F9 */
+            g_back_combo = 1;
+        }
         if (e.type == SDL_CONTROLLERBUTTONDOWN && e.cbutton.button == SDL_CONTROLLER_BUTTON_BACK) g_back_combo = 0;
         if (e.type == SDL_CONTROLLERBUTTONUP && e.cbutton.button == SDL_CONTROLLER_BUTTON_BACK && !g_back_combo)
             g_select_pulse = 6;                                       /* a plain tap: Select for the game */
@@ -458,7 +465,8 @@ u16 platform_pad_buttons(void) {
         };
         int back = SDL_GameControllerGetButton(g_pad, SDL_CONTROLLER_BUTTON_BACK);
         for (unsigned i = 0; i < sizeof map / sizeof map[0]; i++) {
-            if (back && (map[i].bit == 0 || map[i].bit == 5 || map[i].bit == 7)) continue;   /* Back combo (see g_back_combo) */
+            if (back && (map[i].bit == 0 || map[i].bit == 5 || map[i].bit == 7 || map[i].bit == 10 || map[i].bit == 11))
+                continue;                                 /* Back combos (see g_back_combo) */
             if (SDL_GameControllerGetButton(g_pad, map[i].btn)) b |= 1 << map[i].bit;
         }
         if (SDL_GameControllerGetAxis(g_pad, SDL_CONTROLLER_AXIS_TRIGGERLEFT) > 16000) b |= 1 << 8;

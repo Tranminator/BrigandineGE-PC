@@ -29,7 +29,7 @@
  * 8002F840): the pointer picks the attack / spell / skill described. Icon menus count only while the game
  * runs their input (main func 8002B940): their state outlives them, under SUMMON, STATUS...
  * Events (main func 80032004 sets 0x800A69F4 while a script runs): holding the left button holds Square,
- * the game's fast-forward.
+ * the game's fast-forward. Also on the battle map while the other side takes its turn (0x800A6BE0 != 0).
  * Title screen (overlay 3): a click passes PUSH START BUTTON (Start), its menu is a list. SELECT RULER: a
  * sideways push or the wheel is Left / Right.
  * Also lists: UNITS (main func 80049AD4) and the memory card file boxes (main func 80045A74). DOMAIN
@@ -89,6 +89,7 @@
 #define WIN_TABLE       0x800ACE28u
 #define RAM_FADE        0x800A67BCu   /* bit 3: screen fading, no input */
 #define RAM_EVENT       0x800A69F4u   /* 1 while an event script runs (set by main func 80032004) */
+#define RAM_BATTLE_SIDE 0x800A6BE0u   /* battle: side taking its turn (0 = the player's, units carry theirs at +37) */
 #define FF_DELAY        20            /* frames the left button must be held before it fast-forwards */
 /* title screen (overlay 3, id 7, func 800B73F0): state 100 = PUSH START BUTTON (Start only), 110 = menu
  * NEWGAME / CONTINUE / TUTORIAL / RECOLLECTION, index in the generic list index; rows y 114 + 18 k */
@@ -608,8 +609,10 @@ void mouse_update(void) {
             : battle && (mode == 0 || mode == 2) && rd8(RAM_CUR_COL) != 0xFF ? 1 : battle ? 3 : 0;   /* 0xFF: cursor hidden */
     if (!battle && !smap && ctx != 2 && ctx != 4 && ctx != 7 && ctx != 8 && ctx != 9 && ctx != 10) mode = ctx == 6 ? 100 + (int)(rd32(GRID_MODE) != 0) : -1;
     /* events: holding the left button holds Square, the game's fast-forward (the click itself is Circle) */
-    if (s_left_held && rd32(RAM_EVENT) == 1 && s_frame - s_left_down >= FF_DELAY
-        && (ctx == 0 || ctx == 1 || ctx == 3 || ctx == 5)) s_ff_bits = B_SQUARE;
+    /* the same on the battle map while the other side moves */
+    int other_turn = ovl == 6 && rd8(RAM_BATTLE_SIDE) != 0;
+    s_ff_bits = s_left_held && (rd32(RAM_EVENT) == 1 || other_turn) && s_frame - s_left_down >= FF_DELAY
+                && (ctx == 0 || ctx == 1 || ctx == 3 || ctx == 5) ? B_SQUARE : 0;
     /* edge hold: maps with the captured pointer only; a click, the OS pointer or another screen lets go */
     if (!((ctx == 1 || ctx == 5) && s_captured && !abs_move) || s_left || s_right || s_mid) s_edge_bits = 0;
     else edge_release(mvx, mvy);

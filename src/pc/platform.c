@@ -187,22 +187,26 @@ static void present(int skipped) {
     /* screen fit (F3): original 4:3 letterboxed in the window, integer multiples of 320x240 (sharp,
      * even pixels; falls back to 4:3 when the window is smaller than 320x240), stretched over it, or
      * native 1x (320x240, centred) */
-    double aspect = g_show_vram ? 2.0 : 4.0 / 3.0;
+    /* the picture: 320 x 240, or 320 + 2E wide when the widescreen canvas is shown (gpu_hw.c) */
+    int pic_w = !g_show_vram && hw_display_is_wide() ? 320 + 2 * g_ws_extra : 320;
+    double aspect = g_show_vram ? 2.0 : pic_w / 240.0;
     int dw = ow, dh = (int)(ow / aspect);
     if (dh > oh) { dh = oh; dw = (int)(oh * aspect); }
     if (!g_show_vram && g_settings.screen_fit == 1) {
-        int k = ow / 320 < oh / 240 ? ow / 320 : oh / 240;
-        if (k >= 1) { dw = 320 * k; dh = 240 * k; }
+        int k = ow / pic_w < oh / 240 ? ow / pic_w : oh / 240;
+        if (k >= 1) { dw = pic_w * k; dh = 240 * k; }
     } else if (!g_show_vram && g_settings.screen_fit == 2) { dw = ow; dh = oh; }
     else if (!g_show_vram && g_settings.screen_fit == 3) {   /* native 1x: 320x240 window points, centred */
         int ww, wh; SDL_GetWindowSize(g_win, &ww, &wh);
         double px = ww ? (double)ow / ww : 1.0;               /* drawable pixels per point (Retina: 2) */
-        int nw = (int)(320 * px + 0.5), nh = (int)(240 * px + 0.5);
+        int nw = (int)(pic_w * px + 0.5), nh = (int)(240 * px + 0.5);
         if (nw <= ow && nh <= oh) { dw = nw; dh = nh; }
     }
     vgl_draw((ow - dw) / 2, (oh - dh) / 2, dw, dh);
     {   int ww, wh; SDL_GetWindowSize(g_win, &ww, &wh);
-        mouse_set_view((ow - dw) / 2, (oh - dh) / 2, dw, dh, ww ? (float)ow / ww : 1.0f); }
+        /* the mouse works in the game's 320 pixels: the centre part of a wide picture */
+        int cw = pic_w == 320 ? dw : (int)((double)dw * 320 / pic_w + 0.5);
+        mouse_set_view((ow - dw) / 2 + (dw - cw) / 2, (oh - dh) / 2, cw, dh, ww ? (float)ow / ww : 1.0f); }
     ui_frame();
     /* debug: BRIG_SHOT_DIR=<dir> BRIG_SHOT_EVERY=<frames> dumps BMP snapshots of the final window image */
     static int frame_no;
@@ -355,8 +359,10 @@ static void dump_ram(void) {
     }
 }
 
+void ws_frame(void);   /* widescreen.c */
 void platform_vblank(void) {
     SDL_Event e;
+    ws_frame();
     inject_keys();
     poke_ram();
     dump_ram();

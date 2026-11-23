@@ -14,3 +14,4 @@ ov3:0x800B81EC   # title: SELECT RULER (new game), per frame
 ov1:0x800CA034   # strategy: item grid (Organize EQUIP / ITEM), per frame
 ov1:0x800CF8A8   # strategy: NAME letter grid, per frame
 !0x8004C64C      # "Insert disk N" routine: replaced (hle_cd.c) - the disc image is swapped in, no screen
+0x800566BC       # DivideFT4 (PsyQ): widescreen widens its clip width (widescreen.c)

@@ -35,6 +35,8 @@ int  hw_debug_dump(const char *dir);     /* F10: scaled vs software VRAM images 
 
 /* presentation: finish drawing and return the display area as an upscaled texture */
 int  hw_display_texture(unsigned *tex, int *w, int *h, int show_vram);
+int  hw_display_is_wide(void);           /* the last display texture was the wide canvas */
+extern int g_ws_extra;                   /* widescreen: extra native pixels each side (0 = off) */
 
 #ifdef __cplusplus
 }

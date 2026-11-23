@@ -32,7 +32,19 @@ static int s_scale = 1, s_max_scale = 8, s_ready, s_need_resync = 1;
 static GLuint s_native, s_scaled, s_fbo, s_tmp, s_tmp_fbo, s_disp, s_disp_fbo;
 static int s_disp_w, s_disp_h, s_tmp_w, s_tmp_h;
 static GLuint s_prog, s_copy_prog, s_vao, s_vbo;
-static GLint u_vram, u_mode, u_pass, u_hscale, uc_vram, uc_scale;
+static GLint u_vram, u_mode, u_pass, u_hscale, uc_vram, uc_scale, u_xf, uc_xf, u_wide, uc_wide;
+
+/* Widescreen ("wide canvas", like bsnes-hd): the two 320x240 display buffers (VRAM 0,0 and 0,240)
+ * are mirrored into a separate, wider target (320 + 2E) x 480, everything drawn into them shifted E
+ * pixels right and not clipped at x 0 / 319. The game's picture stays the centre; on screens where
+ * the game draws past its 320 pixels (see widescreen.c) the sides show more. VRAM itself is
+ * unchanged (it is full of textures right of the buffers), so readbacks and effects keep working. */
+int g_ws_extra;                     /* E: extra native pixels on each side, 0 = off */
+static GLuint s_wide, s_wide_fbo;
+static int s_wide_e, s_wide_s;      /* E and scale the wide target was made for */
+static int s_last_wide;             /* the last hw_display_texture returned the wide picture */
+#define WS_BUF_W 320
+#define WS_BUF_H 480                /* both buffers, stacked as in VRAM */
 
 /* ------------------------------------------------------------------ shaders */
 static const char VS[] =
@@ -42,8 +54,14 @@ static const char VS[] =
     "layout(location = 2) in vec2 a_uv;\n"
     "layout(location = 3) in uvec4 a_info;\n"
     "flat out uvec4 v_info; noperspective out vec4 v_col; noperspective out vec2 v_uv;\n"
+    "uniform vec4 u_xf;\n"   /* target: (x offset, y offset, width, height) in native pixels */
+    "uniform float u_wide;\n" /* wide canvas pass: E, else 0 */
     "void main() {\n"
-    "  gl_Position = vec4(a_pos.x / 512.0 - 1.0, a_pos.y / 256.0 - 1.0, 0.0, 1.0);\n"
+    "  vec2 q = a_pos;\n"
+    /* screen-wide untextured primitives (gradients, fades): their x 0 / 320 edges reach the canvas edges */
+    "  if (u_wide > 0.0 && ((a_info.x >> 16) & 16u) != 0u) { if (q.x <= 0.0) q.x -= u_wide; else if (q.x >= 320.0) q.x += u_wide; }\n"
+    "  vec2 p = (q + u_xf.xy) / u_xf.zw * 2.0 - 1.0;\n"
+    "  gl_Position = vec4(p, 0.0, 1.0);\n"
     "  v_col = a_col; v_uv = a_uv; v_info = a_info;\n"
     "}\n";
 
@@ -222,6 +240,40 @@ static void draw_verts(const Vert *v, int n) {
     glDrawArrays(GL_TRIANGLES, 0, n);
 }
 
+static GLuint make_rgba_target(int w, int h, GLuint *fbo, int linear);
+/* ---- wide canvas */
+static int wide_on(void) { return g_ws_extra > 0 && s_wide && s_wide_e == g_ws_extra && s_wide_s == s_scale; }
+static int wide_ensure(void) {
+    if (g_ws_extra <= 0) return 0;
+    if (s_wide && s_wide_e == g_ws_extra && s_wide_s == s_scale) return 1;
+    if (s_wide_fbo) glDeleteFramebuffers(1, &s_wide_fbo);
+    if (s_wide) glDeleteTextures(1, &s_wide);
+    s_wide = make_rgba_target((WS_BUF_W + 2 * g_ws_extra) * s_scale, WS_BUF_H * s_scale, &s_wide_fbo, 0);
+    s_wide_e = g_ws_extra; s_wide_s = s_scale;
+    if (!s_wide) return 0;
+    glBindFramebuffer(GL_FRAMEBUFFER, s_wide_fbo);
+    glClearColor(0, 0, 0, 0); glClear(GL_COLOR_BUFFER_BIT);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    return 1;
+}
+/* a draw area that is one display buffer */
+static int is_buffer_area(int x0, int y0, int x1, int y1) {
+    return x0 == 0 && x1 == WS_BUF_W - 1 && (y0 == 0 || y0 == 240) && y1 == y0 + 239;
+}
+/* copy a scaled-VRAM rect inside the buffers into the wide target's centre */
+static void wide_from_vram(Rc r) {
+    if (!wide_on()) return;
+    if (r.x1 > WS_BUF_W) r.x1 = WS_BUF_W;
+    if (r.y1 > WS_BUF_H) r.y1 = WS_BUF_H;
+    if (rc_empty(r)) return;
+    int S = s_scale, E = s_wide_e;
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, s_fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, s_wide_fbo);
+    glBlitFramebuffer(r.x0 * S, r.y0 * S, r.x1 * S, r.y1 * S, (r.x0 + E) * S, r.y0 * S, (r.x1 + E) * S, r.y1 * S,
+                      GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
 static void flush(void) {
     if (!s_nverts) { s_reads.n = 0; s_batch_mode = -1; return; }
     sync_native();
@@ -233,6 +285,17 @@ static void flush(void) {
     glUniform1i(u_mode, s_batch_mode < 0 ? 0 : s_batch_mode);
     glUniform1f(u_hscale, (float)s_scale);
     glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(s_nverts * sizeof(Vert)), s_verts, GL_STREAM_DRAW);
+    int passes = 1 + (wide_ensure() && is_buffer_area(s_ax0, s_ay0, s_ax1, s_ay1));
+    for (int pass = 0; pass < passes; pass++) {
+    if (pass == 0) { glUniform4f(u_xf, 0, 0, VRAM_W, VRAM_H); glUniform1f(u_wide, 0); }
+    else {                                         /* the same batch into the wide canvas, sides unclipped */
+        int E = s_wide_e, S = s_scale;
+        glBindFramebuffer(GL_FRAMEBUFFER, s_wide_fbo);
+        glViewport(0, 0, (WS_BUF_W + 2 * E) * S, WS_BUF_H * S);
+        glScissor(0, s_ay0 * S, (WS_BUF_W + 2 * E) * S, (s_ay1 - s_ay0 + 1) * S);
+        glUniform4f(u_xf, (float)E, 0, (float)(WS_BUF_W + 2 * E), (float)WS_BUF_H);
+        glUniform1f(u_wide, (float)E);
+    }
     if (s_batch_mode == 2) {
         glDisable(GL_BLEND);
         glUniform1i(u_pass, 1);
@@ -254,6 +317,7 @@ static void flush(void) {
         glDrawArrays(GL_TRIANGLES, 0, s_nverts);
     }
     glDisable(GL_BLEND);
+    }
     glDisable(GL_SCISSOR_TEST);
     glUseProgram(0);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -270,6 +334,8 @@ static void copy_native_to_scaled(Rc r) {
     glUseProgram(s_copy_prog);
     glUniform1i(uc_vram, 0);
     glUniform1f(uc_scale, (float)s_scale);
+    glUniform4f(uc_xf, 0, 0, VRAM_W, VRAM_H);
+    glUniform1f(uc_wide, 0);
     Vert q[6]; memset(q, 0, sizeof q);
     float x0 = (float)r.x0, y0 = (float)r.y0, x1 = (float)r.x1, y1 = (float)r.y1;
     float xy[6][2] = { { x0, y0 }, { x1, y0 }, { x0, y1 }, { x1, y0 }, { x1, y1 }, { x0, y1 } };
@@ -277,6 +343,7 @@ static void copy_native_to_scaled(Rc r) {
     draw_verts(q, 6);
     glUseProgram(0);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    wide_from_vram(r);
 }
 
 static void resync(void) {
@@ -301,6 +368,9 @@ static void free_targets(void) {
     if (s_disp) glDeleteTextures(1, &s_disp);
     if (s_tmp_fbo) glDeleteFramebuffers(1, &s_tmp_fbo);
     if (s_tmp) glDeleteTextures(1, &s_tmp);
+    if (s_wide_fbo) glDeleteFramebuffers(1, &s_wide_fbo);
+    if (s_wide) glDeleteTextures(1, &s_wide);
+    s_wide = s_wide_fbo = 0; s_wide_e = s_wide_s = 0;
     s_fbo = s_scaled = s_disp_fbo = s_disp = s_tmp_fbo = s_tmp = 0;
     s_disp_w = s_disp_h = s_tmp_w = s_tmp_h = 0;
 }
@@ -339,6 +409,10 @@ static int init_once(void) {
     u_hscale = glGetUniformLocation(s_prog, "u_scale");
     uc_vram = glGetUniformLocation(s_copy_prog, "u_vram");
     uc_scale = glGetUniformLocation(s_copy_prog, "u_scale");
+    u_xf = glGetUniformLocation(s_prog, "u_xf");
+    uc_xf = glGetUniformLocation(s_copy_prog, "u_xf");
+    u_wide = glGetUniformLocation(s_prog, "u_wide");
+    uc_wide = glGetUniformLocation(s_copy_prog, "u_wide");
 
     glGenTextures(1, &s_native);
     glBindTexture(GL_TEXTURE_2D, s_native);
@@ -466,6 +540,11 @@ void hw_poly(const HwV *v, int nv, int gouraud, int textured, int raw, int semi,
         if (v[i].v > vmax) vmax = v[i].v;
     }
     u32 flags = (textured ? 1u : 0) | (raw ? 2u : 0) | (semi ? 4u : 0) | (g_gpu.mask_set ? 8u : 0);
+    if (!textured) {                               /* spans the whole 320 width: widened on the wide canvas */
+        int mnx = v[0].x, mxx = v[0].x;
+        for (int i = 1; i < nv; i++) { if (v[i].x < mnx) mnx = v[i].x; if (v[i].x > mxx) mxx = v[i].x; }
+        if (mnx <= 0 && mxx >= 320) flags |= 16u;
+    }
     u32 info[4] = { (tpage & 0x1FF) | (flags << 16), clut & 0xFFFF, tw_bits(),
                     (u32)umin | ((u32)vmin << 8) | ((u32)umax << 16) | ((u32)vmax << 24) };
     static const int tris[2][3] = { { 0, 1, 2 }, { 1, 2, 3 } };
@@ -505,6 +584,7 @@ void hw_rect(int x, int y, int w, int h, int r, int g, int b, int textured, int 
     int lv0 = vmin < 0 ? 0 : vmin > 255 ? 255 : vmin, lv1 = vmax < 0 ? 0 : vmax > 255 ? 255 : vmax;
     u32 tp = g_gpu.texpage;
     u32 flags = (textured ? 1u : 0) | (raw ? 2u : 0) | (semi ? 4u : 0) | (g_gpu.mask_set ? 8u : 0);
+    if (!textured && x <= 0 && x + w >= 320) flags |= 16u;   /* screen-wide: widened on the wide canvas */
     u32 info[4] = { (tp & 0x1FF) | (flags << 16), clut & 0xFFFF, tw_bits(),
                     (u32)lu0 | ((u32)lv0 << 8) | ((u32)lu1 << 16) | ((u32)lv1 << 24) };
     float x0 = (float)x, y0 = (float)y, x1 = (float)(x + w), y1 = (float)(y + h);
@@ -579,6 +659,14 @@ void hw_fill(int x, int y, int w, int h, u16 c) {
     glColorMask(1, 1, 1, 1);
     glClearColor((c & 31) * 8 / 255.0f, ((c >> 5) & 31) * 8 / 255.0f, ((c >> 10) & 31) * 8 / 255.0f, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT);
+    if (wide_ensure() && r.x0 < WS_BUF_W && r.y0 < WS_BUF_H) {   /* the wide canvas: a full-width clear covers the sides */
+        int E = s_wide_e, S = s_scale;
+        int x0 = r.x0 == 0 && r.x1 >= WS_BUF_W ? 0 : r.x0 + E, x1 = r.x0 == 0 && r.x1 >= WS_BUF_W ? WS_BUF_W + 2 * E : r.x1 + E;
+        int y1 = r.y1 > WS_BUF_H ? WS_BUF_H : r.y1;
+        glBindFramebuffer(GL_FRAMEBUFFER, s_wide_fbo);
+        glScissor(x0 * S, r.y0 * S, (x1 - x0) * S, (y1 - r.y0) * S);
+        glClear(GL_COLOR_BUFFER_BIT);
+    }
     glDisable(GL_SCISSOR_TEST);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
@@ -606,6 +694,7 @@ void hw_copy(int sx, int sy, int dx, int dy, int w, int h) {
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, s_fbo);
     glBlitFramebuffer(0, 0, tw, th, dx * S, dy * S, (dx + w) * S, (dy + h) * S, GL_COLOR_BUFFER_BIT, GL_NEAREST);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    if (dx < WS_BUF_W && dy < WS_BUF_H) wide_from_vram(d);   /* (the wide sides are not copied) */
 }
 
 /* ------------------------------------------------------------------ debug */
@@ -652,9 +741,30 @@ int hw_debug_dump(const char *dir) {
 }
 
 /* ------------------------------------------------------------------ display */
+int hw_display_is_wide(void) { return s_last_wide; }
+
 int hw_display_texture(unsigned *tex, int *w, int *h, int show_vram) {
     if (!ready()) return 0;
     flush();
+    s_last_wide = 0;
+    extern int g_ws_screen;   /* widescreen.c: this screen draws past its 320 pixels */
+    if (!show_vram && g_ws_screen && wide_on() && g_gpu.disp_x == 0 && g_gpu.disp_w == WS_BUF_W && g_gpu.disp_h == 240 &&
+        (g_gpu.disp_y == 0 || g_gpu.disp_y == 240) && g_gpu.disp_enabled) {
+        int S = s_scale, E = s_wide_e, tw = (WS_BUF_W + 2 * E) * S, th = 240 * S;
+        if (tw != s_disp_w || th != s_disp_h) {
+            if (s_disp_fbo) glDeleteFramebuffers(1, &s_disp_fbo);
+            if (s_disp) glDeleteTextures(1, &s_disp);
+            s_disp = make_rgba_target(tw, th, &s_disp_fbo, 0);
+            s_disp_w = tw; s_disp_h = th;
+        }
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, s_wide_fbo);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, s_disp_fbo);
+        glBlitFramebuffer(0, g_gpu.disp_y * S, tw, (g_gpu.disp_y + 240) * S, 0, 0, tw, th, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        *tex = s_disp; *w = tw; *h = th;
+        s_last_wide = 1;
+        return 1;
+    }
     int x0 = show_vram ? 0 : g_gpu.disp_x, y0 = show_vram ? 0 : g_gpu.disp_y;
     int dw = show_vram ? VRAM_W : g_gpu.disp_w, dh = show_vram ? VRAM_H : g_gpu.disp_h;
     if (x0 + dw > VRAM_W) dw = VRAM_W - x0;

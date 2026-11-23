@@ -16,6 +16,7 @@ typedef struct {
     int screen_fit;               /* 0 = original 4:3 (fit), 1 = integer scale, 2 = stretch, 3 = native 1x (320x240) */
     int fullscreen;               /* 0 = window, 1 = fullscreen (desktop resolution) */
     int window_scale;             /* window size: 1..4 x 320x240 */
+    int widescreen;               /* 0 = off, 1 = 16:9, 2 = 16:10 (hardware renderer, screens that support it) */
 } Settings;
 extern Settings g_settings;
 

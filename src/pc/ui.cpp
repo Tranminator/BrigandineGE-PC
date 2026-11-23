@@ -149,6 +149,10 @@ static void tab_graphics(void) {
     if (ImGui::Combo("Window size", &ws, size_names, IM_ARRAYSIZE(size_names))) { g_settings.window_scale = ws + 1; platform_apply_display(); }
     ImGui::EndDisabled();
     hint("At 1x and 2x the window grows while this settings window is open, and shrinks back when it closes.");
+    static const char *ws_names[] = { "Off (4:3)", "16:9", "16:10" };
+    ImGui::Combo("Widescreen", &g_settings.widescreen, ws_names, IM_ARRAYSIZE(ws_names));
+    hint("Shows more of the strategy map at the sides; menus, events and movies stay 4:3. Needs an internal "
+         "resolution of 2x or more (Renderer below).");
     static const char *fit_names[] = { "Original (4:3)", "Integer scale", "Stretch", "Native 1x (320x240)" };
     ImGui::Combo("Screen fit", &g_settings.screen_fit, fit_names, IM_ARRAYSIZE(fit_names));
     hint("F3 switches in game. Original: the 4:3 picture as large as fits. Integer: whole multiples of 320x240, "

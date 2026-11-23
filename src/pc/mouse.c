@@ -34,6 +34,7 @@
  * sideways push or the wheel is Left / Right.
  * Organize EQUIP / ITEM item grid (strategy func 800CA034): 2 columns, the pointer picks the cell, pushing
  * past the top / bottom row scrolls.
+ * Organize NAME letter grid (strategy func 800CF8A8): the pointer picks the letter, empty cells are skipped.
  * Also lists: UNITS (main func 80049AD4) and the memory card file boxes (main func 80045A74). DOMAIN
  * overview map (strategy func 800C57D8): the box follows the pointer, a click jumps there. In the troop pickers Ctrl / Shift click
  * or middle click is Square (mark a troop; the game then moves to the next row, as with the pad).
@@ -246,6 +247,24 @@ static int it_active(void) {
     return rd32(OVL_ID_ADDR) == 5 && s_frame - s_it_seen <= 2 && (s32)rd32(IT_COUNT) > 0
         && rd32(0x800A6910u) == 0 && !(rd32(RAM_FADE) & 8);
 }
+/* NAME entry (Organize NAME, strategy func 800CF8A8): letter grid, column 0x800DC658 (0..24 letters, 25 =
+ * Kana / Eng. / Space / Cancel / Finish), row 0x800DC65C (0..4); cell 10 x 20 px from (22, 98), the
+ * command column 27 px wide. Letter table 0x800DA4F0 + column + 26 * row + 130 * page (0x800DC88C),
+ * 255 = empty cell (the pad skips those) */
+#define NM_COL   0x800DC658u
+#define NM_ROW   0x800DC65Cu
+#define NM_PAGE  0x800DC88Cu
+#define NM_TABLE 0x800DA4F0u
+static unsigned s_nm_seen = 0x80000000u;
+static double s_nm_x, s_nm_y;
+static int s_nm_valid;
+static u32 s_nm_wr;
+void hook_f_ov1_800CF8A8(Ctx *c) { (void)c; s_nm_seen = s_frame; }
+static int nm_active(void) {
+    return rd32(OVL_ID_ADDR) == 5 && s_frame - s_nm_seen <= 2 && !(rd32(RAM_FADE) & 8) && rd32(0x800A6938u) == 0
+        && rd32(NM_PAGE) < 4;
+}
+static int nm_empty(int col, int row) { return rd8(NM_TABLE + (u32)(col + 26 * row + 130 * (int)rd32(NM_PAGE))) == 255; }
 /* memory card SAVE / LOAD (main func 80045A74): state 40 = choosing one of 3 file boxes (50 px from y 36) */
 #define RAM_MC_STATE 0x800A6CB4u
 #define RAM_MC_FILE  0x800A6CB0u
@@ -625,9 +644,9 @@ void mouse_update(void) {
      * (SUMMON, STATUS...), so the game must also have run its menu input (hook) just now */
     int menu = (s32)rd32(RAM_MENU_LAST) >= 0 && rd32(RAM_MENU_STATE) == 2 && !(flags & 1) && s_frame - s_menu_seen <= 2;
     int smap = ovl == 5 && (flags & 0x9) == 0x9;
-    int ctx = yn_active() ? 7 : sp_active() ? 8 : dom_active() ? 9 : ruler_active() ? 10 : it_active() ? 11 : list_active() ? 4 : grid_active() ? 6 : menu ? 2 : smap ? 5
+    int ctx = yn_active() ? 7 : sp_active() ? 8 : dom_active() ? 9 : ruler_active() ? 10 : it_active() ? 11 : nm_active() ? 12 : list_active() ? 4 : grid_active() ? 6 : menu ? 2 : smap ? 5
             : battle && (mode == 0 || mode == 2) && rd8(RAM_CUR_COL) != 0xFF ? 1 : battle ? 3 : 0;   /* 0xFF: cursor hidden */
-    if (!battle && !smap && ctx != 2 && ctx != 4 && ctx != 7 && ctx != 8 && ctx != 9 && ctx != 10 && ctx != 11) mode = ctx == 6 ? 100 + (int)(rd32(GRID_MODE) != 0) : -1;
+    if (!battle && !smap && ctx != 2 && ctx != 4 && ctx != 7 && ctx != 8 && ctx != 9 && ctx != 10 && ctx != 11 && ctx != 12) mode = ctx == 6 ? 100 + (int)(rd32(GRID_MODE) != 0) : -1;
     /* events: holding the left button holds Square, the game's fast-forward (the click itself is Circle) */
     /* the same on the battle map while the other side moves */
     int other_turn = ovl == 6 && rd8(RAM_BATTLE_SIDE) != 0;
@@ -637,7 +656,7 @@ void mouse_update(void) {
     if (!((ctx == 1 || ctx == 5) && s_captured && !abs_move) || s_left || s_right || s_mid) s_edge_bits = 0;
     else edge_release(mvx, mvy);
     if (ctx != s_last_ctx || mode != s_last_mode) {   /* screen / mode changed: re-anchor the pointer */
-        s_confirm_wait = 0; s_map_valid = 0; s_menu_valid = 0; s_list_valid = 0; s_grid_valid = 0; s_yn_valid = 0; s_sp_valid = 0; s_dom_valid = 0; s_it_valid = 0;
+        s_confirm_wait = 0; s_map_valid = 0; s_menu_valid = 0; s_list_valid = 0; s_grid_valid = 0; s_yn_valid = 0; s_sp_valid = 0; s_dom_valid = 0; s_it_valid = 0; s_nm_valid = 0;
         if (getenv("BRIG_MOUSE_TRACE")) rt_log("[mouse] frame %u ctx %d mode %d", s_frame, ctx, mode);
         s_last_ctx = ctx; s_last_mode = mode;
     }
@@ -836,6 +855,51 @@ void mouse_update(void) {
             }
             s_confirm_menu = k; s_confirm_addr = RAM_YN_INDEX; s_confirm_wait = 2; s_cool = 20;
             return;
+        }
+        return;
+    } else if (ctx == 12) {                           /* NAME: the pointer picks the letter */
+        int col = (s32)rd32(NM_COL), row = (s32)rd32(NM_ROW);
+        u32 cur = (u32)(col << 8 | row);
+        if (!s_nm_valid || cur != s_nm_wr) {          /* the pad moved it: continue from its cell */
+            s_nm_x = col == 25 ? 22 + 250 + 13 : 22 + 10 * col + 5; s_nm_y = 98 + 20 * row + 8;
+            s_nm_wr = cur; s_nm_valid = 1;
+            warp_os_pointer(s_nm_x, s_nm_y);
+            s_moved = 0;
+        }
+        int inside = 1;
+        if (s_moved) {
+            if (abs_move) { s_nm_x = s_vx; s_nm_y = s_vy; } else { s_nm_x += mvx; s_nm_y += mvy; }
+            inside = s_nm_x >= 22 && s_nm_x < 22 + 250 + 27 && s_nm_y >= 98 && s_nm_y < 98 + 100;
+            if (!abs_move) {                          /* captured: stay on the grid */
+                if (s_nm_x < 22) s_nm_x = 22;
+                if (s_nm_x > 22 + 250 + 26) s_nm_x = 22 + 250 + 26;
+                if (s_nm_y < 98) s_nm_y = 98;
+                if (s_nm_y > 98 + 99) s_nm_y = 98 + 99;
+                inside = 1;
+            }
+            if (inside) {
+                int c = (int)floor((s_nm_x - 22) / 10), r = (int)floor((s_nm_y - 98) / 20);
+                if (c > 25) c = 25;
+                if (c < 0) c = 0;
+                if (r > 4) r = 4;
+                if (r < 0) r = 0;
+                if (c < 25 && nm_empty(c, r)) {       /* empty cell: the nearest letter in the row */
+                    int best = -1;
+                    for (int d = 1; d < 25 && best < 0; d++) {
+                        if (c - d >= 0 && !nm_empty(c - d, r)) best = c - d;
+                        else if (c + d < 25 && !nm_empty(c + d, r)) best = c + d;
+                    }
+                    if (best >= 0) c = best;
+                }
+                if (c != col || r != row) { wr32(NM_COL, (u32)c); wr32(NM_ROW, (u32)r); }
+                s_nm_wr = (u32)(c << 8 | r);
+            }
+        }
+        s_moved = 0;
+        if (s_left) {
+            s_left = 0;
+            if ((abs_move || !s_captured) && !(s_vx >= 22 && s_vx < 22 + 250 + 27 && s_vy >= 98 && s_vy < 98 + 100)) return;
+            start_pulse(B_CIRCLE); s_cool = 12; return;
         }
         return;
     } else if (ctx == 11) {                           /* item grid: the pointer picks the cell */

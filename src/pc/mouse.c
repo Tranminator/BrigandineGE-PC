@@ -32,6 +32,8 @@
  * the game's fast-forward. Also on the battle map while the other side takes its turn (0x800A6BE0 != 0).
  * Title screen (overlay 3): a click passes PUSH START BUTTON (Start), its menu is a list. SELECT RULER: a
  * sideways push or the wheel is Left / Right.
+ * Organize EQUIP / ITEM item grid (strategy func 800CA034): 2 columns, the pointer picks the cell, pushing
+ * past the top / bottom row scrolls.
  * Also lists: UNITS (main func 80049AD4) and the memory card file boxes (main func 80045A74). DOMAIN
  * overview map (strategy func 800C57D8): the box follows the pointer, a click jumps there. In the troop pickers Ctrl / Shift click
  * or middle click is Square (mark a troop; the game then moves to the next row, as with the pad).
@@ -225,6 +227,24 @@ static unsigned s_ruler_seen = 0x80000000u;
 void hook_f_ov3_800B81EC(Ctx *c) { (void)c; s_ruler_seen = s_frame; }
 static int ruler_active(void) {
     return rd32(OVL_ID_ADDR) == TITLE_OVL && s_frame - s_ruler_seen <= 2 && rd32(RAM_RULER_STATE) == 10 && !(rd32(RAM_FADE) & 8);
+}
+/* item grid (Organize EQUIP / ITEM, strategy func 800CA034): 2 columns x 4 visible rows of 144 x 16 px
+ * from (16, 138); row = generic list index, first visible row = generic list top, column 0x800DC894,
+ * item = row * 2 + column, count 0x800DC680 */
+#define IT_COUNT 0x800DC680u
+#define IT_COL   0x800DC894u
+#define IT_X 16.0
+#define IT_Y 138.0
+#define IT_W 144.0
+#define IT_H 16.0
+static unsigned s_it_seen = 0x80000000u;
+static double s_it_x, s_it_y, s_it_push;
+static int s_it_valid;
+static u32 s_it_wr;
+void hook_f_ov1_800CA034(Ctx *c) { (void)c; s_it_seen = s_frame; }
+static int it_active(void) {
+    return rd32(OVL_ID_ADDR) == 5 && s_frame - s_it_seen <= 2 && (s32)rd32(IT_COUNT) > 0
+        && rd32(0x800A6910u) == 0 && !(rd32(RAM_FADE) & 8);
 }
 /* memory card SAVE / LOAD (main func 80045A74): state 40 = choosing one of 3 file boxes (50 px from y 36) */
 #define RAM_MC_STATE 0x800A6CB4u
@@ -605,9 +625,9 @@ void mouse_update(void) {
      * (SUMMON, STATUS...), so the game must also have run its menu input (hook) just now */
     int menu = (s32)rd32(RAM_MENU_LAST) >= 0 && rd32(RAM_MENU_STATE) == 2 && !(flags & 1) && s_frame - s_menu_seen <= 2;
     int smap = ovl == 5 && (flags & 0x9) == 0x9;
-    int ctx = yn_active() ? 7 : sp_active() ? 8 : dom_active() ? 9 : ruler_active() ? 10 : list_active() ? 4 : grid_active() ? 6 : menu ? 2 : smap ? 5
+    int ctx = yn_active() ? 7 : sp_active() ? 8 : dom_active() ? 9 : ruler_active() ? 10 : it_active() ? 11 : list_active() ? 4 : grid_active() ? 6 : menu ? 2 : smap ? 5
             : battle && (mode == 0 || mode == 2) && rd8(RAM_CUR_COL) != 0xFF ? 1 : battle ? 3 : 0;   /* 0xFF: cursor hidden */
-    if (!battle && !smap && ctx != 2 && ctx != 4 && ctx != 7 && ctx != 8 && ctx != 9 && ctx != 10) mode = ctx == 6 ? 100 + (int)(rd32(GRID_MODE) != 0) : -1;
+    if (!battle && !smap && ctx != 2 && ctx != 4 && ctx != 7 && ctx != 8 && ctx != 9 && ctx != 10 && ctx != 11) mode = ctx == 6 ? 100 + (int)(rd32(GRID_MODE) != 0) : -1;
     /* events: holding the left button holds Square, the game's fast-forward (the click itself is Circle) */
     /* the same on the battle map while the other side moves */
     int other_turn = ovl == 6 && rd8(RAM_BATTLE_SIDE) != 0;
@@ -617,7 +637,7 @@ void mouse_update(void) {
     if (!((ctx == 1 || ctx == 5) && s_captured && !abs_move) || s_left || s_right || s_mid) s_edge_bits = 0;
     else edge_release(mvx, mvy);
     if (ctx != s_last_ctx || mode != s_last_mode) {   /* screen / mode changed: re-anchor the pointer */
-        s_confirm_wait = 0; s_map_valid = 0; s_menu_valid = 0; s_list_valid = 0; s_grid_valid = 0; s_yn_valid = 0; s_sp_valid = 0; s_dom_valid = 0;
+        s_confirm_wait = 0; s_map_valid = 0; s_menu_valid = 0; s_list_valid = 0; s_grid_valid = 0; s_yn_valid = 0; s_sp_valid = 0; s_dom_valid = 0; s_it_valid = 0;
         if (getenv("BRIG_MOUSE_TRACE")) rt_log("[mouse] frame %u ctx %d mode %d", s_frame, ctx, mode);
         s_last_ctx = ctx; s_last_mode = mode;
     }
@@ -816,6 +836,48 @@ void mouse_update(void) {
             }
             s_confirm_menu = k; s_confirm_addr = RAM_YN_INDEX; s_confirm_wait = 2; s_cool = 20;
             return;
+        }
+        return;
+    } else if (ctx == 11) {                           /* item grid: the pointer picks the cell */
+        int n = (s32)rd32(IT_COUNT), rows = (n + 1) / 2;
+        int top = (s32)rd32(RAM_LIST_TOP), row = (s32)rd32(RAM_LIST_INDEX), col = (s32)rd32(IT_COL);
+        u32 cur = (u32)(top << 20 | row << 8 | col);
+        if (!s_it_valid || cur != s_it_wr) {          /* the pad moved it: continue from its cell */
+            s_it_x = IT_X + IT_W * col + IT_W / 2; s_it_y = IT_Y + IT_H * (row - top) + IT_H / 2;
+            s_it_wr = cur; s_it_valid = 1; s_it_push = 0;
+            warp_os_pointer(s_it_x, s_it_y);
+            s_moved = 0;
+        }
+        if (s_wheel_up || s_wheel_down) {             /* wheel: one row per notch (the game scrolls) */
+            int d = s_wheel_down > s_wheel_up ? 1 : -1; s_wheel_up = s_wheel_down = 0;
+            s_moved = 0; start_pulse(d > 0 ? B_DOWN : B_UP); return;
+        }
+        if (s_moved) {
+            if (abs_move) { s_it_x = s_vx; s_it_y = s_vy; } else { s_it_x += mvx; s_it_y += mvy; }
+            int inside = s_it_x >= IT_X && s_it_x < IT_X + 2 * IT_W && s_it_y >= IT_Y && s_it_y < IT_Y + 4 * IT_H;
+            if (!abs_move) {                          /* captured: stay on the grid, push past it to scroll */
+                if (s_it_x < IT_X) s_it_x = IT_X;
+                if (s_it_x > IT_X + 2 * IT_W - 1) s_it_x = IT_X + 2 * IT_W - 1;
+                if (s_it_y < IT_Y) { if (top > 0) s_it_push += s_it_y - IT_Y; s_it_y = IT_Y; }
+                else if (s_it_y > IT_Y + 4 * IT_H - 1) { if (top + 4 < rows) s_it_push += s_it_y - (IT_Y + 4 * IT_H - 1); s_it_y = IT_Y + 4 * IT_H - 1; }
+                else s_it_push = 0;
+                if (s_it_push <= -IT_H && top > 0) { top--; s_it_push = 0; }
+                if (s_it_push >= IT_H && top + 4 < rows) { top++; s_it_push = 0; }
+                inside = 1;
+            }
+            if (inside) {
+                int r = top + (int)floor((s_it_y - IT_Y) / IT_H), c = s_it_x >= IT_X + IT_W;
+                if (r > rows - 1) r = rows - 1;
+                if (r * 2 + c >= n) c = 0;            /* odd count: the last row has one item */
+                wr32(RAM_LIST_TOP, (u32)top); wr32(RAM_LIST_INDEX, (u32)r); wr32(IT_COL, (u32)c);
+                s_it_wr = (u32)(top << 20 | r << 8 | c);
+            }
+        }
+        s_moved = 0;
+        if (s_left) {
+            s_left = 0;
+            if ((abs_move || !s_captured) && !(s_vx >= IT_X && s_vx < IT_X + 2 * IT_W && s_vy >= IT_Y && s_vy < IT_Y + 4 * IT_H)) return;
+            start_pulse(B_CIRCLE); s_cool = 20; return;
         }
         return;
     } else if (ctx == 10) {                           /* SELECT RULER: sideways push / wheel = Left / Right */

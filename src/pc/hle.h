@@ -11,7 +11,11 @@ void platform_set_movie_frame(const u8 *rgb, int w, int h); /* NULL = back to VR
 void platform_apply_video(void);  /* VSync setting changed */
 
 /* disc.c */
-int  disc_open(const char *bin_path);
+int  disc_open(const char *bin_path);          /* Disc 1 (Disc 2 is looked for next to it) */
+int  disc_open_second(const char *bin_path);   /* Disc 2, explicit */
+int  disc_select(int disc);                     /* 0 / 1: put that image in the drive; 0 = not available */
+int  disc_current(void);
+void disc_sync_from_ram(void);                 /* hle_cd.c: after a state load */
 int  disc_read_sector(u32 lba, u8 *dst2048);
 int  disc_read_raw(u32 lba, u8 *dst2352);
 int  disc_find_file(const char *path, u32 *lba, u32 *size);

@@ -1,5 +1,5 @@
 /* Brigandine GE native port — entry point.
- * usage: brigandine <path to Disc 1 .bin> */
+ * usage: brigandine <path to Disc 1 .bin> [Disc 2 .bin]  (Disc 2 is found next to Disc 1 when omitted) */
 #include "hle.h"
 #include "gpu.h"
 #include "audio.h"
@@ -38,10 +38,11 @@ static int load_exe(void) {
 int main(int argc, char **argv) {
     if (getenv("BRIG_KANJI_TEST")) { void kanji_selftest(void); kanji_selftest(); return 0; }   /* debug */
     if (argc < 2) {
-        fprintf(stderr, "usage: %s <Brigandine GE Disc 1 .bin>\n", argv[0]);
+        fprintf(stderr, "usage: %s <Brigandine GE Disc 1 .bin> [Disc 2 .bin]\n", argv[0]);
         return 1;
     }
     if (!disc_open(argv[1])) { fprintf(stderr, "cannot open %s\n", argv[1]); return 1; }
+    if (argc > 2 && !disc_open_second(argv[2])) fprintf(stderr, "cannot open %s (Disc 2)\n", argv[2]);
     if (!load_exe()) return 1;
     settings_load();   /* before the window: VSync / frame skip apply at startup */
     if (!platform_init("Brigandine: Grand Edition")) { fprintf(stderr, "SDL init failed\n"); return 1; }

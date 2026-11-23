@@ -20,9 +20,9 @@ from the game is stored in this repository.
 ## Status
 Boots and plays natively: title, menus, story/scenario, strategy map, unit organisation, dialogue,
 FMV movies (with voice), XA + sequenced music, sound effects, reverb, settings window (F2), save / load.
-Memory card saves (standard 128 KB card images, compatible with emulators).
-Not done yet: battles not fully tested, Disc 2 swap,
-high-resolution renderer, Windows build.
+Memory card saves (standard 128 KB card images, compatible with emulators). High-resolution renderer.
+Both discs: the port swaps to Disc 2 / Disc 1 by itself when the game asks for it.
+Not done yet: long play-through testing, widescreen, Windows build.
 
 ## Build (macOS)
 ```sh
@@ -40,8 +40,13 @@ cmake -S . -B build/cmake && cmake --build build/cmake -j8
 
 ## Run
 ```sh
-./build/cmake/brigandine "iso/Disc 1/<disc1>.bin"
+./build/cmake/brigandine "iso/Disc 1/<disc1>.bin"                       # Disc 2 is found in "iso/Disc 2/"
+./build/cmake/brigandine "<disc1>.bin" "<disc2>.bin"                     # or name it explicitly
 ```
+The game needs Disc 2 for some story movies, and asks for it ("Insert disk 2"). The port then puts the
+Disc 2 image in the drive by itself (a short "Disc 2 inserted" message) and the game goes on; nothing has to be
+done. Disc 2 is looked for at the Disc 1 path with "Disc 1" changed to "Disc 2" (that file, or the first `.bin`
+in that folder). Without it the game stays on "Insert disk 2".
 | PS1 | Keyboard | Controller |
 |---|---|---|
 | D-pad | Arrow keys | D-pad |

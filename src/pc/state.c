@@ -182,6 +182,7 @@ static void do_load(Ctx *c, int slot) {
     fclose(f);
     if (s.err) rt_fatal("save state %s is truncated", path);   /* state already partly applied */
     audio_flush_xa();
+    disc_sync_from_ram();               /* the state may come from the other disc */
     platform_set_movie_frame(NULL, 0, 0);
     state_reset_autosave_tracking();
     snprintf(msg, sizeof msg, "%s loaded", name);

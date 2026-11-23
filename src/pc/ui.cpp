@@ -298,6 +298,9 @@ static void tab_save(void) {
          "Memory card saves in the game's own menu still work and stay compatible with emulators.");
 
     const float th = 72.0f, tw = th * THUMB_W / THUMB_H;
+    int last = -1;                                    /* newest save, manual or autosave: "Last saved" */
+    for (int i = 0; i < NSLOTS; i++)
+        if (s_slots[i].status == 1 && (last < 0 || s_slots[i].h.time > s_slots[last].h.time)) last = i;
     ImGui::BeginChild("slots", ImVec2(0, 380), ImGuiChildFlags_Borders);
     for (int i = 0; i < NSLOTS; i++) {
         SlotView &v = s_slots[i];
@@ -310,15 +313,11 @@ static void tab_save(void) {
          * hover there and the row blinks): draw it ourselves, the Selectable stays transparent */
         ImVec2 p1(p0.x + ImGui::GetContentRegionAvail().x, p0.y + th);
         bool row_hot = ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect(p0, p1);
-        /* hover: a light fill. The selected slot (F5 / F9 target) is marked apart from that: an accent
-         * outline and an "F5 / F9" tag, so it never looks like a stuck hover */
-        float rr = ImGui::GetStyle().FrameRounding;
+        /* hover: a light fill only; which slot is what is told by text tags ("Last saved", "F5 / F9") */
         if (row_hot) {
             ImVec4 col = ImGui::GetStyleColorVec4(ImGuiCol_HeaderHovered); col.w *= 0.45f;
-            ImGui::GetWindowDrawList()->AddRectFilled(p0, p1, ImGui::GetColorU32(col), rr);
+            ImGui::GetWindowDrawList()->AddRectFilled(p0, p1, ImGui::GetColorU32(col), ImGui::GetStyle().FrameRounding);
         }
-        if (selected)
-            ImGui::GetWindowDrawList()->AddRect(p0, p1, ImGui::GetColorU32(ImGuiCol_CheckMark), rr, 0, 2.0f);
         ImGui::PushStyleColor(ImGuiCol_Header, 0); ImGui::PushStyleColor(ImGuiCol_HeaderHovered, 0);
         ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImGui::GetColorU32(ImGuiCol_HeaderActive));
         if (ImGui::Selectable("##row", selected, ImGuiSelectableFlags_AllowOverlap, ImVec2(0, th)) && manual)
@@ -337,10 +336,8 @@ static void tab_save(void) {
         state_slot_name(v.slot, name, sizeof name);
         slot_info(v, l1, l2, sizeof l1);
         ImGui::TextUnformatted(name);
-        if (selected) {
-            ImGui::SameLine();
-            ImGui::TextColored(ImGui::GetStyleColorVec4(ImGuiCol_CheckMark), "F5 / F9");
-        }
+        if (i == last) { ImGui::SameLine(); ImGui::TextColored(ImVec4(0.45f, 0.85f, 0.45f, 1.0f), "Last saved"); }
+        if (selected) { ImGui::SameLine(); ImGui::TextDisabled("(F5 / F9)"); }
         ImGui::TextDisabled("%s", l1);
         if (l2[0]) ImGui::TextUnformatted(l2);
         ImGui::EndGroup();

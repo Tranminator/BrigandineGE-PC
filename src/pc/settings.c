@@ -44,7 +44,7 @@ void settings_load(void) {
             else if (sscanf(line, "mouse_capture=%d", &v) == 1) g_settings.mouse_capture = v != 0;
             else if (sscanf(line, "render_scale=%d", &v) == 1) g_settings.render_scale = clamp_range(v, 1, 8);
             else if (sscanf(line, "disc=%d", &v) == 1) g_settings.disc = clamp_range(v, 1, 2);
-            else if (sscanf(line, "screen_fit=%d", &v) == 1) g_settings.screen_fit = clamp_range(v, 0, 2);
+            else if (sscanf(line, "screen_fit=%d", &v) == 1) g_settings.screen_fit = clamp_range(v, 0, 3);
             else if (sscanf(line, "fullscreen=%d", &v) == 1) g_settings.fullscreen = v != 0;
             else if (sscanf(line, "window_scale=%d", &v) == 1) g_settings.window_scale = clamp_range(v, 1, 4);
         }
@@ -67,7 +67,7 @@ void settings_save(void) {
     if (!f) return;
     fprintf(f, "# Brigandine GE native port settings\n# volumes 0-100\nbgm=%d\nsfx=%d\nmovie=%d\n"
                "# video: vsync 0/1, frameskip 0 off / 1 auto / 2-4 draw 1 of N, show_perf 0/1,\n"
-               "# render_scale 1 = native (software) / 2-8 = hardware renderer at N x, screen_fit 0 = original 4:3 / 1 = integer / 2 = stretch,\n"
+               "# render_scale 1 = native (software) / 2-8 = hardware renderer at N x, screen_fit 0 = original 4:3 / 1 = integer / 2 = stretch / 3 = native 1x,\n"
                "# fullscreen 0 = window / 1 = fullscreen, window_scale 1-4 = window size in multiples of 320x240\n"
                "vsync=%d\nframeskip=%d\nshow_perf=%d\nrender_scale=%d\nscreen_fit=%d\nfullscreen=%d\nwindow_scale=%d\n"
                "# system: fast_load 0 = original CD speed / 1 = instant, autosave 0/1, slot = save slot for F5/F9 (1-10), mouse 0/1, mouse_speed 5-200 (%%), mouse_capture 0/1\nfast_load=%d\nautosave=%d\nslot=%d\nmouse=%d\nmouse_speed=%d\nmouse_capture=%d\n"

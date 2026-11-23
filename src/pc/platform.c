@@ -185,7 +185,8 @@ static void present(int skipped) {
     int ow, oh;
     vgl_drawable_size(&ow, &oh);
     /* screen fit (F3): original 4:3 letterboxed in the window, integer multiples of 320x240 (sharp,
-     * even pixels; falls back to 4:3 when the window is smaller than 320x240), or stretched over it */
+     * even pixels; falls back to 4:3 when the window is smaller than 320x240), stretched over it, or
+     * native 1x (320x240, centred) */
     double aspect = g_show_vram ? 2.0 : 4.0 / 3.0;
     int dw = ow, dh = (int)(ow / aspect);
     if (dh > oh) { dh = oh; dw = (int)(oh * aspect); }
@@ -193,6 +194,12 @@ static void present(int skipped) {
         int k = ow / 320 < oh / 240 ? ow / 320 : oh / 240;
         if (k >= 1) { dw = 320 * k; dh = 240 * k; }
     } else if (!g_show_vram && g_settings.screen_fit == 2) { dw = ow; dh = oh; }
+    else if (!g_show_vram && g_settings.screen_fit == 3) {   /* native 1x: 320x240 window points, centred */
+        int ww, wh; SDL_GetWindowSize(g_win, &ww, &wh);
+        double px = ww ? (double)ow / ww : 1.0;               /* drawable pixels per point (Retina: 2) */
+        int nw = (int)(320 * px + 0.5), nh = (int)(240 * px + 0.5);
+        if (nw <= ow && nh <= oh) { dw = nw; dh = nh; }
+    }
     vgl_draw((ow - dw) / 2, (oh - dh) / 2, dw, dh);
     {   int ww, wh; SDL_GetWindowSize(g_win, &ww, &wh);
         mouse_set_view((ow - dw) / 2, (oh - dh) / 2, dw, dh, ww ? (float)ow / ww : 1.0f); }
@@ -364,8 +371,9 @@ void platform_vblank(void) {
         }
         if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_F1) g_show_vram ^= 1;
         if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.sym == SDLK_F3) {   /* screen fit, like RetroArch */
-            static const char *names[] = { "Screen: original 4:3", "Screen: integer scale", "Screen: stretch" };
-            g_settings.screen_fit = (g_settings.screen_fit + 1) % 3;
+            static const char *names[] = { "Screen: original 4:3", "Screen: integer scale", "Screen: stretch",
+                                           "Screen: native 1x (320x240)" };
+            g_settings.screen_fit = (g_settings.screen_fit + 1) % 4;
             if (!getenv("BRIG_STATE_DIR")) settings_save();
             ui_toast(names[g_settings.screen_fit]);
         }

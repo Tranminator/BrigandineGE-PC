@@ -144,15 +144,15 @@ static void tab_graphics(void) {
     static const char *disp_names[] = { "Window", "Fullscreen" };
     if (ImGui::Combo("Display", &g_settings.fullscreen, disp_names, IM_ARRAYSIZE(disp_names))) platform_apply_display();
     ImGui::BeginDisabled(g_settings.fullscreen != 0);
-    static const char *size_names[] = { "1x (320x240, original size)", "2x (640x480)", "3x (960x720)", "4x (1280x960)" };
+    static const char *size_names[] = { "1x (320x240, original size)", "2x (640x480)", "3x (960x720, default)", "4x (1280x960)" };
     int ws = g_settings.window_scale - 1;
     if (ImGui::Combo("Window size", &ws, size_names, IM_ARRAYSIZE(size_names))) { g_settings.window_scale = ws + 1; platform_apply_display(); }
     ImGui::EndDisabled();
     hint("At 1x and 2x the window grows while this settings window is open, and shrinks back when it closes.");
-    static const char *fit_names[] = { "Original (4:3)", "Integer scale", "Stretch" };
+    static const char *fit_names[] = { "Original (4:3)", "Integer scale", "Stretch", "Native 1x (320x240)" };
     ImGui::Combo("Screen fit", &g_settings.screen_fit, fit_names, IM_ARRAYSIZE(fit_names));
     hint("F3 switches in game. Original: the 4:3 picture as large as fits. Integer: whole multiples of 320x240, "
-         "sharp and even pixels (a border may remain). Stretch: fills the window.");
+         "sharp and even pixels (a border may remain). Stretch: fills the window. Native 1x: the original 320x240, centred.");
 
     ImGui::SeparatorText("Renderer");
     {
@@ -227,7 +227,7 @@ static void tab_controls(void) {
         { "Triangle", "S", "Y" }, { "Square", "A", "X" }, { "L1 / R1", "Q / E", "LB / RB" },
         { "L2 / R2", "1 / 3", "LT / RT" }, { "Start / Select", "Enter / Backspace", "Start / Back" },
         { "Fast-forward (hold)", "Tab", "" }, { "Quick save / load", "F5 / F9", "Back + LB / RB" }, { "Change save slot", "Left Shift + Left / Right", "Back + D-pad L / R" },
-        { "Screen fit (original / integer / stretch)", "F3", "" }, { "This window", "F2", "" },
+        { "Screen fit (original / integer / stretch / 1x)", "F3", "" }, { "This window", "F2", "" },
     };
     bool m = g_settings.mouse != 0;
     if (ImGui::Checkbox("Mouse control", &m)) g_settings.mouse = m;

@@ -14,6 +14,8 @@ typedef struct {
     int render_scale;             /* 1 = native software renderer, 2..8 = hardware renderer at N x */
     int disc;                     /* disc in the drive at the last session (1 / 2): the next start boots it */
     int screen_fit;               /* 0 = original 4:3 (fit), 1 = integer scale, 2 = stretch to the window */
+    int fullscreen;               /* 0 = window, 1 = fullscreen (desktop resolution) */
+    int window_scale;             /* window size: 1..4 x 320x240 */
 } Settings;
 extern Settings g_settings;
 

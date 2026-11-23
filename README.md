@@ -85,7 +85,8 @@ Kana / Eng. / Space / Cancel / Finish), click. SAVE / LOAD: point at a file, cli
 the mouse picks the column and a click sorts.
 
 `F3` switches the screen fit, like RetroArch: original 4:3, integer scale (whole multiples of 320×240) or
-stretch. `F5` quick save, `F9` quick load (see below). `F1` shows all of VRAM (debug). Hold `Tab` to fast-forward.
+stretch. `F2` → **Graphics** also has Display (window, the default, or fullscreen) and the window size
+(1x = the original 320×240 up to 4x; at 1x / 2x the window grows while `F2` is open). `F5` quick save, `F9` quick load (see below). `F1` shows all of VRAM (debug). Hold `Tab` to fast-forward.
 
 Settings: press `F2` (mouse, keyboard or controller; `F2`/`Esc` closes and saves). Game input is
 paused while the window is open.

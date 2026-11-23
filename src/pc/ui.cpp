@@ -313,7 +313,7 @@ static void tab_save(void) {
          * hover there and the row blinks): draw it ourselves, the Selectable stays transparent */
         ImVec2 p1(p0.x + ImGui::GetContentRegionAvail().x, p0.y + th);
         bool row_hot = ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect(p0, p1);
-        /* hover: a light fill only; which slot is what is told by text tags ("Last saved", "(selected)") */
+        /* hover: a light fill only; which slot is what is told by text tags ("Last saved", "Selected") */
         if (row_hot) {
             ImVec4 col = ImGui::GetStyleColorVec4(ImGuiCol_HeaderHovered); col.w *= 0.45f;
             ImGui::GetWindowDrawList()->AddRectFilled(p0, p1, ImGui::GetColorU32(col), ImGui::GetStyle().FrameRounding);
@@ -337,15 +337,15 @@ static void tab_save(void) {
         slot_info(v, l1, l2, sizeof l1);
         ImGui::TextUnformatted(name);
         if (i == last) { ImGui::SameLine(); ImGui::TextColored(ImVec4(0.45f, 0.85f, 0.45f, 1.0f), "Last saved"); }
-        if (selected) { ImGui::SameLine(); ImGui::TextDisabled("(selected)"); }
+        if (selected) { ImGui::SameLine(); ImGui::TextColored(ImVec4(0.95f, 0.72f, 0.12f, 1.0f), "Selected"); }
         ImGui::TextDisabled("%s", l1);
         if (l2[0]) ImGui::TextUnformatted(l2);
         ImGui::EndGroup();
 
         float bw = 64.0f, right = ImGui::GetWindowContentRegionMax().x;
-        ImGui::SameLine(right - bw * 3 - 2 * ImGui::GetStyle().ItemSpacing.x);   /* the last button ends at the row edge */
+        ImGui::SameLine(right - bw * 3 - 2 * ImGui::GetStyle().ItemSpacing.x - 12);   /* a little in from the row edge */
         ImGui::BeginGroup();
-        ImGui::Dummy(ImVec2(0, th * 0.5f - ImGui::GetFrameHeight() * 0.5f - 4));
+        ImGui::Dummy(ImVec2(0, th * 0.5f - ImGui::GetFrameHeight() * 0.5f - 14));
         if (manual) {
             if (ImGui::Button("Save", ImVec2(bw, 0))) {
                 state_set_slot(v.slot);

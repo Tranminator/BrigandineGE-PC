@@ -1,14 +1,82 @@
-/* Raw MODE2/2352 disc image access + ISO9660 lookup. */
+/* Raw MODE2/2352 disc image access + ISO9660 lookup.
+ * Two images: Disc 1 and Disc 2. The game asks for the other disc itself (main func 8004C64C, the
+ * "Insert disk N" routine); the port then swaps the image in at once (disc_select), so nothing has
+ * to be done by the player. Both discs hold the same code and data; they differ in their movies,
+ * XA/MUSIC0.XA and the EXE name the game checks (SLPS_026.61 / .62). */
 #include "hle.h"
 #include <stdio.h>
 #include <ctype.h>
+#include <dirent.h>
+#include <string.h>
+#include <stdlib.h>
+#include "settings.h"
 
-static FILE *g_disc;
+static FILE *g_imgs[2];       /* Disc 1, Disc 2 (NULL: not found) */
+static FILE *g_disc;          /* the one "in the drive" */
+static int g_cur;             /* 0 = Disc 1, 1 = Disc 2 */
+static char g_paths[2][1024];
+
+static int open_slot(int i, const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    if (g_imgs[i]) fclose(g_imgs[i]);
+    g_imgs[i] = f;
+    snprintf(g_paths[i], sizeof g_paths[i], "%s", path);
+    return 1;
+}
+
+/* Disc 2 next to Disc 1: the same path with "Disc 1" -> "Disc 2" (file, or the first .bin in that
+ * folder), as in "iso/Disc 1/...(Disc 1).bin" + "iso/Disc 2/...(Disc 2).bin" */
+static void find_disc2(const char *d1) {
+    char p[1024];
+    snprintf(p, sizeof p, "%s", d1);
+    char *hit = NULL;
+    for (char *q = strstr(p, "Disc 1"); q; q = strstr(q + 1, "Disc 1")) { q[5] = '2'; hit = q; }
+    if (!hit) return;
+    if (open_slot(1, p)) return;
+    char dir[1024]; snprintf(dir, sizeof dir, "%s", p);
+    char *slash = strrchr(dir, '/');
+    if (!slash) return;
+    *slash = 0;
+    DIR *d = opendir(dir);
+    if (!d) return;
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        size_t n = strlen(e->d_name);
+        if (n > 4 && !strcasecmp(e->d_name + n - 4, ".bin")) {
+            char f[2048]; snprintf(f, sizeof f, "%s/%s", dir, e->d_name);
+            if (open_slot(1, f)) break;
+        }
+    }
+    closedir(d);
+}
 
 int disc_open(const char *path) {
-    if (g_disc) fclose(g_disc);
-    g_disc = fopen(path, "rb");
-    return g_disc != NULL;
+    if (!open_slot(0, path)) return 0;
+    g_disc = g_imgs[0]; g_cur = 0;
+    if (!g_imgs[1]) find_disc2(path);
+    rt_log("[disc] Disc 1: %s", g_paths[0]);
+    rt_log("[disc] Disc 2: %s", g_imgs[1] ? g_paths[1] : "(not found)");
+    /* boot the disc of the last session (as if it were left in the drive); tests: BRIG_START_DISC=1/2 */
+    int start = getenv("BRIG_START_DISC") ? atoi(getenv("BRIG_START_DISC")) : g_settings.disc;
+    if (start == 2 && !g_imgs[1]) start = 1;
+    if (start == 2) { g_disc = g_imgs[1]; g_cur = 1; rt_log("[disc] starting with Disc 2 in the drive"); }
+    return 1;
+}
+
+int disc_open_second(const char *path) { return open_slot(1, path); }
+
+int disc_current(void) { return g_cur; }
+
+int disc_select(int i) {
+    if (i < 0 || i > 1 || !g_imgs[i]) return 0;
+    if (i != g_cur) rt_log("[disc] Disc %d in the drive", i + 1);
+    g_disc = g_imgs[i]; g_cur = i;
+    if (g_settings.disc != i + 1) {               /* remembered: the next start boots this disc */
+        g_settings.disc = i + 1;
+        if (!getenv("BRIG_STATE_DIR")) settings_save();   /* tests leave the real settings alone */
+    }
+    return 1;
 }
 
 int disc_read_sector(u32 lba, u8 *dst) {

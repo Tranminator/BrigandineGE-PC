@@ -166,6 +166,7 @@ void hle_CdSearchFile(Ctx *c) {
         c->r[2] = 0;
         return;
     }
+    if (getenv("BRIG_CDTRACE")) rt_log("CdSearchFile(%s): lba %u on Disc %d", name, lba, disc_current() + 1);
     u8 b[3]; lba_to_bcd(lba, b);
     wr8(fp + 0, b[0]); wr8(fp + 1, b[1]); wr8(fp + 2, b[2]); wr8(fp + 3, 0);
     wr32(fp + 4, size);
@@ -178,4 +179,43 @@ void cd_state(StateIO *s) {
     ST(s, g_cd_pos); ST(s, g_cd_mode); ST(s, g_cd_reading); ST(s, g_cd_frac); ST(s, g_cd_lastcom);
     ST(s, g_xa_file); ST(s, g_xa_chan); ST(s, g_cd_result); ST(s, g_head); ST(s, g_read_done_vb);
     ST(s, g_read_last_poll); ST(s, g_read_sectors_per_vb10);
+}
+
+/* "Insert disk N" (main func 8004C64C), replaced: the game always asks for the other disc (gp+4 =
+ * 0x800A5FCC holds the current one, 0 = Disc 1). The original shows a screen, waits for the lid to
+ * open and close, then identifies the disc (func 8004CF54: MOVIE/BUG16.STR = Disc 1, BUG17.STR =
+ * Disc 2), which sets 0x800A5FCC and patches the per-disc LBAs. Here the other image goes in at once
+ * and 8004CF54 runs directly: no screen, no wait. Without that image (or if the check fails) the
+ * original routine runs and shows "Insert disk N" as on the console. */
+#define RAM_DISC  0x800A5FCCu
+#define RAM_FLAGS 0x800A67BCu
+void ui_toast(const char *msg);
+int hook_f_main_8004C64C(Ctx *c) {
+    int want = 1 - (int)(rd32(RAM_DISC) & 1);
+    char msg[128];
+    if (!disc_select(want)) {
+        snprintf(msg, sizeof msg, "Disc %d image not found: put it next to Disc %d, or pass it as the 2nd argument",
+                 want + 1, 2 - want);
+        rt_log("[disc] the game asks for Disc %d: %s", want + 1, msg);
+        ui_toast(msg);
+        return 0;                                     /* the game's own "Insert disk" screen */
+    }
+    f_main_8004CF54(c);                               /* identify the disc: 0x800A5FCC + per-disc LBAs */
+    if (!c->r[2] || (int)(rd32(RAM_DISC) & 1) != want) {
+        rt_log("[disc] Disc %d check failed, falling back to the game's screen", want + 1);
+        return 0;
+    }
+    /* what the routine leaves behind: flag bit 0 clear, bit 2 set, its two work variables cleared */
+    wr32(RAM_FLAGS, (rd32(RAM_FLAGS) & ~1u) | 4u);
+    wr32(0x800A6828u, 0);
+    wr32(0x800A6860u, 0);
+    snprintf(msg, sizeof msg, "Disc %d", want + 1);
+    rt_log("[disc] the game asks for Disc %d: swapped in", want + 1);
+    ui_toast(msg);
+    return 1;
+}
+
+/* after a save-state load: the drive holds the disc the game believes it has */
+void disc_sync_from_ram(void) {
+    if (!disc_select((int)(rd32(RAM_DISC) & 1))) disc_select(0);
 }

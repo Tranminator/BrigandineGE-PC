@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-Settings g_settings = { 30, 100, 50, 1, 0, 0, 0, 1, 1, 1, 50, 1, 1 };   /* BGM 30% matches the emulator balance (user-tested); movies 50% (user choice) */
+Settings g_settings = { 30, 100, 50, 1, 0, 0, 0, 1, 1, 1, 50, 1, 1, 1 };   /* BGM 30% matches the emulator balance (user-tested); movies 50% (user choice) */
 extern float g_bgm_gain, g_sfx_gain, g_movie_gain;   /* audio.c */
 
 static char g_path[1024];
@@ -43,6 +43,7 @@ void settings_load(void) {
             else if (sscanf(line, "mouse_speed=%d", &v) == 1) g_settings.mouse_speed = clamp_range(v, 5, 200);
             else if (sscanf(line, "mouse_capture=%d", &v) == 1) g_settings.mouse_capture = v != 0;
             else if (sscanf(line, "render_scale=%d", &v) == 1) g_settings.render_scale = clamp_range(v, 1, 8);
+            else if (sscanf(line, "disc=%d", &v) == 1) g_settings.disc = clamp_range(v, 1, 2);
         }
         fclose(f);
     }
@@ -65,9 +66,10 @@ void settings_save(void) {
                "# video: vsync 0/1, frameskip 0 off / 1 auto / 2-4 draw 1 of N, show_perf 0/1,\n"
                "# render_scale 1 = native (software) / 2-8 = hardware renderer at N x\n"
                "vsync=%d\nframeskip=%d\nshow_perf=%d\nrender_scale=%d\n"
-               "# system: fast_load 0 = original CD speed / 1 = instant, autosave 0/1, slot = save slot for F5/F9 (1-10), mouse 0/1, mouse_speed 5-200 (%%), mouse_capture 0/1\nfast_load=%d\nautosave=%d\nslot=%d\nmouse=%d\nmouse_speed=%d\nmouse_capture=%d\n",
+               "# system: fast_load 0 = original CD speed / 1 = instant, autosave 0/1, slot = save slot for F5/F9 (1-10), mouse 0/1, mouse_speed 5-200 (%%), mouse_capture 0/1\nfast_load=%d\nautosave=%d\nslot=%d\nmouse=%d\nmouse_speed=%d\nmouse_capture=%d\n"
+               "# disc in the drive at the last session (1 / 2): the next start boots that disc\ndisc=%d\n",
             g_settings.bgm, g_settings.sfx, g_settings.movie, g_settings.vsync, g_settings.frameskip, g_settings.show_perf, g_settings.render_scale,
-            g_settings.fast_load, g_settings.autosave, g_settings.slot, g_settings.mouse, g_settings.mouse_speed, g_settings.mouse_capture);
+            g_settings.fast_load, g_settings.autosave, g_settings.slot, g_settings.mouse, g_settings.mouse_speed, g_settings.mouse_capture, g_settings.disc);
     fclose(f);
 }
 

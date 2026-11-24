@@ -43,6 +43,8 @@ int g_ws_extra;                     /* E: extra native pixels on each side, 0 = 
 static GLuint s_wide, s_wide_fbo;
 static int s_wide_e, s_wide_s;      /* E and scale the wide target was made for */
 static int s_last_wide;             /* the last hw_display_texture returned the wide picture */
+static int s_vram_stale;            /* buffer batches went to the wide canvas only: the scaled VRAM's
+                                       display buffers are out of date (refreshed before they are read) */
 #define WS_BUF_W 320
 #define WS_BUF_H 480                /* both buffers, stacked as in VRAM */
 
@@ -274,6 +276,20 @@ static void wide_from_vram(Rc r) {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
+/* the reverse, for the rect of the buffers about to be read from the scaled VRAM */
+static void vram_from_wide(Rc r) {
+    if (!s_vram_stale || !s_wide) return;
+    if (r.x1 > WS_BUF_W) r.x1 = WS_BUF_W;
+    if (r.y1 > WS_BUF_H) r.y1 = WS_BUF_H;
+    if (rc_empty(r)) return;
+    int S = s_scale, E = s_wide_e;
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, s_wide_fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, s_fbo);
+    glBlitFramebuffer((r.x0 + E) * S, r.y0 * S, (r.x1 + E) * S, r.y1 * S, r.x0 * S, r.y0 * S, r.x1 * S, r.y1 * S,
+                      GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
 static void flush(void) {
     if (!s_nverts) { s_reads.n = 0; s_batch_mode = -1; return; }
     sync_native();
@@ -285,8 +301,12 @@ static void flush(void) {
     glUniform1i(u_mode, s_batch_mode < 0 ? 0 : s_batch_mode);
     glUniform1f(u_hscale, (float)s_scale);
     glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(s_nverts * sizeof(Vert)), s_verts, GL_STREAM_DRAW);
-    int passes = 1 + (wide_ensure() && is_buffer_area(s_ax0, s_ay0, s_ax1, s_ay1));
-    for (int pass = 0; pass < passes; pass++) {
+    int to_wide = wide_ensure() && is_buffer_area(s_ax0, s_ay0, s_ax1, s_ay1);
+    /* a screen shown wide: the batch goes to the wide canvas only (half the fill at high scales) */
+    extern int g_ws_screen;
+    int first = to_wide && g_ws_screen ? 1 : 0;
+    if (first) s_vram_stale = 1;
+    for (int pass = first; pass < 1 + to_wide; pass++) {
     if (pass == 0) { glUniform4f(u_xf, 0, 0, VRAM_W, VRAM_H); glUniform1f(u_wide, 0); }
     else {                                         /* the same batch into the wide canvas, sides unclipped */
         int E = s_wide_e, S = s_scale;
@@ -370,7 +390,7 @@ static void free_targets(void) {
     if (s_tmp) glDeleteTextures(1, &s_tmp);
     if (s_wide_fbo) glDeleteFramebuffers(1, &s_wide_fbo);
     if (s_wide) glDeleteTextures(1, &s_wide);
-    s_wide = s_wide_fbo = 0; s_wide_e = s_wide_s = 0;
+    s_wide = s_wide_fbo = 0; s_wide_e = s_wide_s = 0; s_vram_stale = 0;
     s_fbo = s_scaled = s_disp_fbo = s_disp = s_tmp_fbo = s_tmp = 0;
     s_disp_w = s_disp_h = s_tmp_w = s_tmp_h = 0;
 }
@@ -680,6 +700,7 @@ void hw_copy(int sx, int sy, int dx, int dy, int w, int h) {
         copy_native_to_scaled(rc_make(0, 0, VRAM_W, VRAM_H));
         return;
     }
+    if (sx < WS_BUF_W && sy < WS_BUF_H) vram_from_wide(rc_make(sx, sy, w, h));
     int S = s_scale, tw = w * S, th = h * S;
     if (tw > s_tmp_w || th > s_tmp_h) {             /* temp target for overlapping copies */
         if (s_tmp_fbo) glDeleteFramebuffers(1, &s_tmp_fbo);
@@ -765,6 +786,7 @@ int hw_display_texture(unsigned *tex, int *w, int *h, int show_vram) {
         s_last_wide = 1;
         return 1;
     }
+    if (s_vram_stale) { vram_from_wide(rc_make(0, 0, WS_BUF_W, WS_BUF_H)); s_vram_stale = 0; }
     int x0 = show_vram ? 0 : g_gpu.disp_x, y0 = show_vram ? 0 : g_gpu.disp_y;
     int dw = show_vram ? VRAM_W : g_gpu.disp_w, dh = show_vram ? VRAM_H : g_gpu.disp_h;
     if (x0 + dw > VRAM_W) dw = VRAM_W - x0;

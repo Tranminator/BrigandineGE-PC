@@ -36,6 +36,12 @@ static void set_view_rect(int e) {
     s_view_wide = e;
 }
 
+/* the game picture's width for window sizes: 320, or 320 + 2E with widescreen chosen */
+int ws_picture_w(void) {
+    int mode = g_settings.widescreen;
+    return 320 + 2 * (mode >= 1 && mode <= 2 ? k_extra[mode] : 0);
+}
+
 void ws_frame(void) {
     int mode = g_settings.widescreen;
     g_ws_extra = g_hw_on && mode >= 1 && mode <= 2 ? k_extra[mode] : 0;

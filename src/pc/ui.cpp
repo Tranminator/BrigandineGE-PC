@@ -16,6 +16,7 @@ extern "C" {
 void platform_apply_video(void);
 void platform_apply_display(void);
 void platform_ui_window(int open);
+int ws_picture_w(void);
 }
 #include <time.h>
 
@@ -144,13 +145,19 @@ static void tab_graphics(void) {
     static const char *disp_names[] = { "Window", "Fullscreen" };
     if (ImGui::Combo("Display", &g_settings.fullscreen, disp_names, IM_ARRAYSIZE(disp_names))) platform_apply_display();
     ImGui::BeginDisabled(g_settings.fullscreen != 0);
-    static const char *size_names[] = { "1x (320x240, original size)", "2x (640x480)", "3x (960x720, default)", "4x (1280x960)" };
+    /* window sizes follow the picture: 4:3, or wider with widescreen chosen */
+    char size_buf[4][48]; const char *size_names[4];
+    for (int i = 0; i < 4; i++) {
+        snprintf(size_buf[i], sizeof size_buf[i], "%dx (%dx%d%s)", i + 1, ws_picture_w() * (i + 1), 240 * (i + 1),
+                 i == 0 ? ", original size" : i == 2 ? ", default" : "");
+        size_names[i] = size_buf[i];
+    }
     int ws = g_settings.window_scale - 1;
-    if (ImGui::Combo("Window size", &ws, size_names, IM_ARRAYSIZE(size_names))) { g_settings.window_scale = ws + 1; platform_apply_display(); }
+    if (ImGui::Combo("Window size", &ws, size_names, 4)) { g_settings.window_scale = ws + 1; platform_apply_display(); }
     ImGui::EndDisabled();
     hint("At 1x and 2x the window grows while this settings window is open, and shrinks back when it closes.");
     static const char *ws_names[] = { "Off (4:3)", "16:9", "16:10" };
-    ImGui::Combo("Widescreen", &g_settings.widescreen, ws_names, IM_ARRAYSIZE(ws_names));
+    if (ImGui::Combo("Widescreen", &g_settings.widescreen, ws_names, IM_ARRAYSIZE(ws_names))) platform_apply_display();
     hint("Shows more of the strategy map at the sides; menus, events and movies stay 4:3. Needs an internal "
          "resolution of 2x or more (Renderer below).");
     static const char *fit_names[] = { "Original (4:3)", "Integer scale", "Stretch", "Native 1x (320x240)" };

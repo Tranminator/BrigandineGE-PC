@@ -49,13 +49,14 @@ void platform_set_movie_frame(const u8 *rgb, int w, int h) { g_movie_rgb = rgb; 
 /* Window / fullscreen and the window size (F2 > Graphics). Fullscreen uses the desktop resolution; the
  * picture inside follows the screen fit. Leaving fullscreen restores the chosen window size. */
 static int g_ui_grown;        /* the window was enlarged for the settings window (1x / 2x sizes) */
+int ws_picture_w(void);       /* widescreen.c: 320, or wider with widescreen chosen */
 void platform_ui_window(int open);
 void platform_apply_display(void) {
     if (!g_win) return;
     if (g_settings.fullscreen) { SDL_SetWindowFullscreen(g_win, SDL_WINDOW_FULLSCREEN_DESKTOP); return; }
     SDL_SetWindowFullscreen(g_win, 0);
     g_ui_grown = 0;
-    SDL_SetWindowSize(g_win, 320 * g_settings.window_scale, 240 * g_settings.window_scale);
+    SDL_SetWindowSize(g_win, ws_picture_w() * g_settings.window_scale, 240 * g_settings.window_scale);
     SDL_SetWindowPosition(g_win, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
     if (ui_is_open()) platform_ui_window(1);          /* (shrinks back to the new size when it closes) */          /* changed from the settings window: keep it usable */
 }
@@ -92,7 +93,7 @@ int platform_init(const char *title) {
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 0);
-    int win_w = 320 * g_settings.window_scale, win_h = 240 * g_settings.window_scale;   /* tests: BRIG_WINDOW=WxH */
+    int win_w = ws_picture_w() * g_settings.window_scale, win_h = 240 * g_settings.window_scale;   /* tests: BRIG_WINDOW=WxH */
     if (getenv("BRIG_WINDOW")) sscanf(getenv("BRIG_WINDOW"), "%dx%d", &win_w, &win_h);
     g_win = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, win_w, win_h,
                              SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_OPENGL);

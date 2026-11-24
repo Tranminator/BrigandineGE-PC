@@ -42,6 +42,8 @@ static GLint u_vram, u_mode, u_pass, u_hscale, uc_vram, uc_scale, u_xf, uc_xf, u
 int g_ws_extra;                     /* E: extra native pixels on each side, 0 = off */
 static GLuint s_wide, s_wide_fbo;
 static int s_wide_e, s_wide_s;      /* E and scale the wide target was made for */
+static int s_wide_stale;            /* 4:3 screens draw to the scaled VRAM only: the wide canvas's centre is
+                                     * old until a wide screen starts (then it is refreshed from VRAM once) */
 static int s_last_wide;             /* the last hw_display_texture returned the wide picture */
 static int s_vram_stale;            /* buffer batches went to the wide canvas only: the scaled VRAM's
                                        display buffers are out of date (refreshed before they are read) */
@@ -256,6 +258,7 @@ static int wide_ensure(void) {
     glBindFramebuffer(GL_FRAMEBUFFER, s_wide_fbo);
     glClearColor(0, 0, 0, 0); glClear(GL_COLOR_BUFFER_BIT);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    s_wide_stale = 1;
     return 1;
 }
 /* a draw area that is one display buffer */
@@ -264,7 +267,7 @@ static int is_buffer_area(int x0, int y0, int x1, int y1) {
 }
 /* copy a scaled-VRAM rect inside the buffers into the wide target's centre */
 static void wide_from_vram(Rc r) {
-    if (!wide_on()) return;
+    if (!wide_on() || s_wide_stale) return;
     if (r.x1 > WS_BUF_W) r.x1 = WS_BUF_W;
     if (r.y1 > WS_BUF_H) r.y1 = WS_BUF_H;
     if (rc_empty(r)) return;
@@ -274,6 +277,13 @@ static void wide_from_vram(Rc r) {
     glBlitFramebuffer(r.x0 * S, r.y0 * S, r.x1 * S, r.y1 * S, (r.x0 + E) * S, r.y0 * S, (r.x1 + E) * S, r.y1 * S,
                       GL_COLOR_BUFFER_BIT, GL_NEAREST);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+/* a wide screen starts: bring the canvas's centre up to date with the scaled VRAM */
+static void wide_refresh(void) {
+    if (!s_wide_stale || !wide_on()) return;
+    s_wide_stale = 0;
+    wide_from_vram(rc_make(0, 0, WS_BUF_W, WS_BUF_H));
 }
 
 /* the reverse, for the rect of the buffers about to be read from the scaled VRAM */
@@ -292,6 +302,12 @@ static void vram_from_wide(Rc r) {
 
 static void flush(void) {
     if (!s_nverts) { s_reads.n = 0; s_batch_mode = -1; return; }
+    int to_wide = wide_ensure() && is_buffer_area(s_ax0, s_ay0, s_ax1, s_ay1);
+    /* each batch is drawn once: a screen shown wide into the wide canvas only, a 4:3 screen into the
+     * scaled VRAM only (drawing both halved the frame rate at high scales) */
+    extern int g_ws_screen;
+    if (to_wide && !g_ws_screen) { to_wide = 0; s_wide_stale = 1; }
+    if (to_wide) wide_refresh();
     sync_native();
     bind_target();
     glEnable(GL_SCISSOR_TEST);
@@ -301,10 +317,7 @@ static void flush(void) {
     glUniform1i(u_mode, s_batch_mode < 0 ? 0 : s_batch_mode);
     glUniform1f(u_hscale, (float)s_scale);
     glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(s_nverts * sizeof(Vert)), s_verts, GL_STREAM_DRAW);
-    int to_wide = wide_ensure() && is_buffer_area(s_ax0, s_ay0, s_ax1, s_ay1);
-    /* a screen shown wide: the batch goes to the wide canvas only (half the fill at high scales) */
-    extern int g_ws_screen;
-    int first = to_wide && g_ws_screen ? 1 : 0;
+    int first = to_wide ? 1 : 0;
     if (first) s_vram_stale = 1;
     for (int pass = first; pass < 1 + to_wide; pass++) {
     if (pass == 0) { glUniform4f(u_xf, 0, 0, VRAM_W, VRAM_H); glUniform1f(u_wide, 0); }
@@ -390,7 +403,7 @@ static void free_targets(void) {
     if (s_tmp) glDeleteTextures(1, &s_tmp);
     if (s_wide_fbo) glDeleteFramebuffers(1, &s_wide_fbo);
     if (s_wide) glDeleteTextures(1, &s_wide);
-    s_wide = s_wide_fbo = 0; s_wide_e = s_wide_s = 0; s_vram_stale = 0;
+    s_wide = s_wide_fbo = 0; s_wide_e = s_wide_s = 0; s_vram_stale = 0; s_wide_stale = 0;
     s_fbo = s_scaled = s_disp_fbo = s_disp = s_tmp_fbo = s_tmp = 0;
     s_disp_w = s_disp_h = s_tmp_w = s_tmp_h = 0;
 }
@@ -771,6 +784,7 @@ int hw_display_texture(unsigned *tex, int *w, int *h, int show_vram) {
     extern int g_ws_screen;   /* widescreen.c: this screen draws past its 320 pixels */
     if (!show_vram && g_ws_screen && wide_on() && g_gpu.disp_x == 0 && g_gpu.disp_w == WS_BUF_W && g_gpu.disp_h == 240 &&
         (g_gpu.disp_y == 0 || g_gpu.disp_y == 240) && g_gpu.disp_enabled) {
+        wide_refresh();
         int S = s_scale, E = s_wide_e, tw = (WS_BUF_W + 2 * E) * S, th = 240 * S;
         if (tw != s_disp_w || th != s_disp_h) {
             if (s_disp_fbo) glDeleteFramebuffers(1, &s_disp_fbo);

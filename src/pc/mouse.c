@@ -530,6 +530,16 @@ static void smap_to_screen(double wx, double wz, double *sx, double *sy) {
     double u = wx - cu, v = wz - cv;
     *sx = 160 + u * smap_s(v); *sy = smap_y(v);
 }
+/* the strategy camera follows its cursor at most ~0.3 column a frame, however hard the mouse pushes.
+ * A fast pointer that ran straight into the edge stopped dead there and only then crawled on with the
+ * scroll, which read as a stall. Near the edge the outward step is cut down step by step to that scroll
+ * speed instead (a quarter of the distance left, plus the scroll speed), so the pointer slows into it */
+#define SMAP_EDGE_V 0.3
+static void smap_ease(double *w, double from, double lo, double hi) {
+    double step = *w - from;
+    if (step < 0 && from > lo) { double m = SMAP_EDGE_V + (from - lo) * 0.25; if (-step > m) *w = from - m; }
+    if (step > 0 && from < hi) { double m = SMAP_EDGE_V + (hi - from) * 0.25; if (step > m) *w = from + m; }
+}
 /* the game's castle hit test (overlay func 800B89D0), run after the mouse moves the cursor: which
  * castle is under it decides the name shown and what Circle picks */
 static void smap_castle_hit(void) {
@@ -787,6 +797,10 @@ void mouse_update(void) {
             smap_to_world(sx, sy, &wx, &wz);
             /* a little past the camera box: the game's camera follows, so pushing on scrolls */
             double cu, cv; smap_cam(&cu, &cv);
+            if (!abs_move) {                          /* ease into the edge (columns per frame) */
+                smap_ease(&wx, s_wx, cu - SMAP_U - 0.4, cu + SMAP_U + 0.4);
+                smap_ease(&wz, s_wz, cv + SMAP_V0 - 0.3, cv + SMAP_V1 + 0.3);
+            }
             if (!abs_move) edge_push(wx <= cu - SMAP_U - 0.4, wx >= cu + SMAP_U + 0.4,
                                      wz <= cv + SMAP_V0 - 0.3, wz >= cv + SMAP_V1 + 0.3, mvx, mvy, 0.5);
             if (wx < cu - SMAP_U - 0.4) wx = cu - SMAP_U - 0.4;

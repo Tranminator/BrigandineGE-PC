@@ -18,3 +18,4 @@ ov1:0x800CF8A8   # strategy: NAME letter grid, per frame
 ov1:0x800C3D58   # strategy map terrain draw: widescreen screen detection (widescreen.c)
 0x8002727C       # battle map tile draw: widescreen screen detection (widescreen.c)
 !ov2:0x800B95D0  # battle camera follow: widened for the wide battle map (widescreen.c)
+0x80027810       # battle map terrain draw (polygon mode, zoomed): widescreen screen detection (widescreen.c)

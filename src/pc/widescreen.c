@@ -5,8 +5,9 @@
  * of other screens). Other screens stay 4:3 in the middle. Software renderer (Native): always 4:3.
  *
  * Screens:
- *   battle map (overlay id 6): its tile map draw (main func 8002727C) ran in the last frames. That
- *   draw drops the columns outside x 0..319 (0x800A68D4 / 0x800A68D8): widened by E on each side. The
+ *   battle map (overlay id 6): its tile map draw ran in the last frames: main func 8002727C (16x16
+ *   tiles) or, zoomed in, main func 80027810 (polygons, from the view rectangle below). The tile one
+ *   drops the columns outside x 0..319 (0x800A68D4 / 0x800A68D8): widened by E on each side. The
  *   unit / terrain panel below the map is 320 wide: the sides beside it are kept black (g_ws_mask_y).
  *   strategy map (overlay 1, id 5): its terrain draw (ov1 func 800C3D58) ran in the last frames. Its terrain is drawn by main func 80028B14 through
  *   PsyQ DivideFT4, which drops a polygon whose four corners are all outside the screen width given in
@@ -34,6 +35,7 @@ void hook_f_ov1_800C3D58(Ctx *c) { (void)c; s_terrain_seen = s_vb; }   /* strate
 static int s_view_wide;            /* E written into the view rectangle (0 = original) */
 static unsigned s_tiles_seen = 0x80000000u;
 void hook_f_main_8002727C(Ctx *c) { (void)c; s_tiles_seen = s_vb; }   /* battle map tile draw */
+void hook_f_main_80027810(Ctx *c) { (void)c; if (rd32(OVL_ID_ADDR) == 6) s_tiles_seen = s_vb; }   /* the same, polygons */
 
 /* battle map: the tile map's column clip (x min / max, s32), widened by E */
 #define RAM_TILE_CLIP_X0 0x800A68D4u
@@ -78,8 +80,9 @@ void ws_frame(void) {
      * after a load or a menu; UI flag bit 3 only comes once the quill takes input) */
     u32 ovl = rd32(OVL_ID_ADDR);
     if (g_ws_extra && ovl == 5 && s_vb - s_terrain_seen <= 2) g_ws_screen = 1;
-    /* the battle map likewise: its tile map was drawn just now */
-    int battle = g_ws_extra && ovl == 6 && s_vb - s_tiles_seen <= 2;
+    /* the battle map likewise: its tile map was drawn just now (zoomed in, every other frame: one
+     * slow frame more is allowed) */
+    int battle = g_ws_extra && ovl == 6 && s_vb - s_tiles_seen <= 3;
     if (battle) g_ws_screen = 1;
     g_ws_mask_y = battle ? BATTLE_PANEL_Y : 0;
     set_view_rect(g_ws_screen ? g_ws_extra : 0);

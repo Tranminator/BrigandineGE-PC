@@ -19,3 +19,4 @@ ov1:0x800C3D58   # strategy map terrain draw: widescreen screen detection (wides
 0x8002727C       # battle map tile draw: widescreen screen detection (widescreen.c)
 !ov2:0x800B95D0  # battle camera follow: widened for the wide battle map (widescreen.c)
 0x80027810       # battle map terrain draw (polygon mode, zoomed): widescreen screen detection (widescreen.c)
+!ov2:0x800B96F4  # battle camera clamp: the wide top-down battle map stays inside the map (widescreen.c)

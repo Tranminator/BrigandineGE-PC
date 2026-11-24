@@ -34,8 +34,9 @@ static unsigned s_vb, s_terrain_seen = 0x80000000u;
 void hook_f_ov1_800C3D58(Ctx *c) { (void)c; s_terrain_seen = s_vb; }   /* strategy map terrain draw */
 static int s_view_wide;            /* E written into the view rectangle (0 = original) */
 static unsigned s_tiles_seen = 0x80000000u;
-void hook_f_main_8002727C(Ctx *c) { (void)c; s_tiles_seen = s_vb; }   /* battle map tile draw */
-void hook_f_main_80027810(Ctx *c) { (void)c; if (rd32(OVL_ID_ADDR) == 6) s_tiles_seen = s_vb; }   /* the same, polygons */
+static unsigned s_flat_seen = 0x80000000u;   /* the top-down view (16x16 tiles) */
+void hook_f_main_8002727C(Ctx *c) { (void)c; s_tiles_seen = s_flat_seen = s_vb; }   /* battle map tile draw */
+void hook_f_main_80027810(Ctx *c) { (void)c; if (rd32(OVL_ID_ADDR) == 6) s_tiles_seen = s_vb; }   /* the same, tilted */
 
 /* battle map: the tile map's column clip (x min / max, s32), widened by E */
 #define RAM_TILE_CLIP_X0 0x800A68D4u
@@ -129,5 +130,26 @@ int hook_f_ov2_800B95D0(Ctx *c) {
     ac = (s32)rd32(0x800A67AC);
     v1 = (hi << 8) + ac;
     if (v1 < cx) wr32(0x800A67AC, (u32)(ac + (cx - v1)));
+    return 1;
+}
+
+/* Battle camera clamp (overlay func 800B96F4, replaced on the wide top-down battle map): the camera
+ * stays inside the map. Its x limit is (view x + 160) / 3 + 160, made for the tilted view (beyond
+ * the map edge it shows the sky and the map's side); top-down, nothing is drawn there, so the wide
+ * picture would show leftovers: the limit becomes 160 + E, the wide picture's half width. The z part
+ * is the original. The tilted view keeps the original. */
+int hook_f_ov2_800B96F4(Ctx *c) {
+    (void)c;
+    if (!g_ws_screen || rd32(OVL_ID_ADDR) != 6 || !s_clip_wide || s_vb - s_flat_seen > 3) return 0;
+    s32 vy = (s16)rd16(RAM_VIEW_RECT + 8 + 2), vh = (s16)rd16(RAM_VIEW_RECT + 8 + 6);   /* 0x800A6748 */
+    s32 b0 = (s32)rd32(0x800A67B0);
+    s32 zmin = (0x78 - (vy + 0x78) / 2) << 8;
+    if (b0 < zmin) { b0 = zmin; wr32(0x800A67B0, (u32)b0); }
+    s32 zmax = (0x42F - (vy + vh)) << 8;
+    if (zmax < b0) wr32(0x800A67B0, (u32)zmax);
+    s32 xmin = (160 + s_clip_wide) << 8, xmax = 0x41F00 - xmin;
+    s32 ac = (s32)rd32(0x800A67AC);
+    if (ac < xmin) { ac = xmin; wr32(0x800A67AC, (u32)ac); }
+    if (xmax < ac) wr32(0x800A67AC, (u32)xmax);
     return 1;
 }

@@ -534,10 +534,11 @@ static void smap_to_screen(double wx, double wz, double *sx, double *sy) {
  * A fast pointer that ran straight into the edge stopped dead there and only then crawled on with the
  * scroll, which read as a stall. Near the edge the outward step is cut down step by step to that scroll
  * speed instead (a quarter of the distance left, plus the scroll speed), so the pointer slows into it */
-/* at a held edge the scroll is Cursor Speed plus the outward push. A hand never pushes evenly (and mouse
- * reports land unevenly in frames), so the raw push made the camera jump between its slowest and fastest
- * every frame. The push is smoothed instead (about 0.15 s): pushing harder still scrolls faster, but the
- * speed changes gently, and when the hand stops it eases back to Cursor Speed */
+/* at a held edge the scroll goes at the faster of the outward push (Pointer speed) and Cursor Speed:
+ * the game's held D-pad moves the cursor, and the push only adds what it has beyond that (edge_max).
+ * A hand never pushes evenly (and mouse reports land unevenly in frames), so the raw push made the camera
+ * jump every frame. The push is smoothed instead (about 0.15 s): it changes gently, and when the hand
+ * stops it eases back to Cursor Speed */
 static double s_edge_vx, s_edge_vy;
 static void edge_smooth(double *mv, u16 neg, u16 pos, double *v) {
     int held = s_edge_bits & (neg | pos);
@@ -547,6 +548,13 @@ static void edge_smooth(double *mv, u16 neg, u16 pos, double *v) {
     else *v += (out - *v) * 0.12;
     if (*v < 0.01) *v = 0;
     *mv = (s_edge_bits & neg) ? -*v : *v;
+}
+#define RAM_CUR_SPEED 0x800A6694u   /* Cursor Speed as the game uses it: held D-pad step, 1/8192 column a frame */
+static void edge_max(double *w, double from, double v, u16 neg, u16 pos) {
+    double d = *w - from;
+    if ((s_edge_bits & neg) && d < 0) { d += v; if (d > 0) d = 0; }
+    else if ((s_edge_bits & pos) && d > 0) { d -= v; if (d < 0) d = 0; }
+    *w = from + d;
 }
 #define SMAP_EDGE_V 0.3
 static void smap_ease(double *w, double from, double lo, double hi) {
@@ -817,6 +825,11 @@ void mouse_update(void) {
             smap_to_world(sx, sy, &wx, &wz);
             /* a little past the camera box: the game's camera follows, so pushing on scrolls */
             double cu, cv; smap_cam(&cu, &cv);
+            if (!abs_move && s_edge_bits) {           /* held edge: the faster of push and Cursor Speed */
+                double v = (s32)rd32(RAM_CUR_SPEED) / 8192.0;
+                edge_max(&wx, s_wx, v, B_LEFT, B_RIGHT);
+                edge_max(&wz, s_wz, v, B_UP, B_DOWN);
+            }
             if (!abs_move) {                          /* ease into the edge (columns per frame) */
                 smap_ease(&wx, s_wx, cu - SMAP_U - 0.4, cu + SMAP_U + 0.4);
                 smap_ease(&wz, s_wz, cv + SMAP_V0 - 0.3, cv + SMAP_V1 + 0.3);

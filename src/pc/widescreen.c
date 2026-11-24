@@ -5,7 +5,7 @@
  * of other screens). Other screens stay 4:3 in the middle. Software renderer (Native): always 4:3.
  *
  * Screens:
- *   strategy map (overlay 1, id 5, UI flags bit 3). Its terrain is drawn by main func 80028B14 through
+ *   strategy map (overlay 1, id 5): its terrain draw (ov1 func 800C3D58) ran in the last frames. Its terrain is drawn by main func 80028B14 through
  *   PsyQ DivideFT4, which drops a polygon whose four corners are all outside the screen width given in
  *   its DIVPOLYGON4 (pih = 320): that width is widened by 2E here, so the sides get their polygons
  *   too (the 4:3 picture is unchanged: the GPU clips the extra ones in VRAM). What is drawn at all comes
@@ -15,7 +15,6 @@
 #include "settings.h"
 
 #define OVL_ID_ADDR  0x800B6838u
-#define RAM_UI_FLAGS 0x800A6AB0u   /* bit 3: strategy map */
 
 int g_ws_screen;                   /* this frame's screen draws past its 320 pixels */
 
@@ -25,6 +24,8 @@ static const int k_extra[] = { 0, 53, 32 };   /* off, 16:9 (426x240), 16:10 (384
  * onto the map plane to find what to draw (main func 80029918 -> visible rect 0x800A6748). With
  * the wide canvas the rectangle is widened by E on each side, and put back on other screens. */
 #define RAM_VIEW_RECT 0x800A6740u
+static unsigned s_vb, s_terrain_seen = 0x80000000u;
+void hook_f_ov1_800C3D58(Ctx *c) { (void)c; s_terrain_seen = s_vb; }   /* strategy map terrain draw */
 static int s_view_wide;            /* E written into the view rectangle (0 = original) */
 
 static void set_view_rect(int e) {
@@ -46,8 +47,10 @@ void ws_frame(void) {
     int mode = g_settings.widescreen;
     g_ws_extra = g_hw_on && mode >= 1 && mode <= 2 ? k_extra[mode] : 0;
     g_ws_screen = 0;
-    u32 ovl = rd32(OVL_ID_ADDR), flags = rd32(RAM_UI_FLAGS);
-    if (g_ws_extra && ovl == 5 && (flags & 8)) g_ws_screen = 1;
+    s_vb++;
+    /* the strategy map is on screen when the game drew its terrain just now (from the first frame
+     * after a load or a menu; UI flag bit 3 only comes once the quill takes input) */
+    if (g_ws_extra && rd32(OVL_ID_ADDR) == 5 && s_vb - s_terrain_seen <= 2) g_ws_screen = 1;
     set_view_rect(g_ws_screen ? g_ws_extra : 0);
 }
 

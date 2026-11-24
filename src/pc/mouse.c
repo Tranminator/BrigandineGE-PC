@@ -530,6 +530,38 @@ static void smap_to_screen(double wx, double wz, double *sx, double *sy) {
     double u = wx - cu, v = wz - cv;
     *sx = 160 + u * smap_s(v); *sy = smap_y(v);
 }
+/* the strategy camera follows its cursor at most ~0.3 column a frame, however hard the mouse pushes.
+ * A fast pointer that ran straight into the edge stopped dead there and only then crawled on with the
+ * scroll, which read as a stall. Near the edge the outward step is cut down step by step to that scroll
+ * speed instead (a quarter of the distance left, plus the scroll speed), so the pointer slows into it */
+/* at a held edge the scroll goes at the faster of the outward push (Pointer speed) and Cursor Speed:
+ * the game's held D-pad moves the cursor, and the push only adds what it has beyond that (edge_max).
+ * A hand never pushes evenly (and mouse reports land unevenly in frames), so the raw push made the camera
+ * jump every frame. The push is smoothed instead (about 0.15 s): it changes gently, and when the hand
+ * stops it eases back to Cursor Speed */
+static double s_edge_vx, s_edge_vy;
+static void edge_smooth(double *mv, u16 neg, u16 pos, double *v) {
+    int held = s_edge_bits & (neg | pos);
+    if (!held) { *v = 0; return; }
+    double out = (s_edge_bits & neg) ? (*mv < 0 ? -*mv : 0) : (*mv > 0 ? *mv : 0);
+    if (*v == 0) *v = out;                     /* just reached the edge: carry on at the push */
+    else *v += (out - *v) * 0.12;
+    if (*v < 0.01) *v = 0;
+    *mv = (s_edge_bits & neg) ? -*v : *v;
+}
+#define RAM_CUR_SPEED 0x800A6694u   /* Cursor Speed as the game uses it: held D-pad step, 1/8192 column a frame */
+static void edge_max(double *w, double from, double v, u16 neg, u16 pos) {
+    double d = *w - from;
+    if ((s_edge_bits & neg) && d < 0) { d += v; if (d > 0) d = 0; }
+    else if ((s_edge_bits & pos) && d > 0) { d -= v; if (d < 0) d = 0; }
+    *w = from + d;
+}
+#define SMAP_EDGE_V 0.3
+static void smap_ease(double *w, double from, double lo, double hi) {
+    double step = *w - from;
+    if (step < 0 && from > lo) { double m = SMAP_EDGE_V + (from - lo) * 0.25; if (-step > m) *w = from - m; }
+    if (step > 0 && from < hi) { double m = SMAP_EDGE_V + (hi - from) * 0.25; if (step > m) *w = from + m; }
+}
 /* the game's castle hit test (overlay func 800B89D0), run after the mouse moves the cursor: which
  * castle is under it decides the name shown and what Circle picks */
 static void smap_castle_hit(void) {
@@ -712,12 +744,18 @@ void mouse_update(void) {
             s_wx = (s32)gx / 8192.0; s_wz = (s32)gz / 8192.0 - 0.5;
             s_wr_x = gx; s_wr_z = gz; s_map_valid = 1;
             double sx, sy; world_to_screen(s_wx, s_wz, &sx, &sy); warp_os_pointer(sx, sy);
-            s_moved = 0;
+            if (!s_edge_bits) s_moved = 0;            /* a held edge: that was our own D-pad, push on */
+        }
+        double fx = mvx, fy = mvy;
+        if (!abs_move) {                              /* held edge: the push is smoothed, and it coasts */
+            edge_smooth(&fx, B_LEFT, B_RIGHT, &s_edge_vx);
+            edge_smooth(&fy, B_UP, B_DOWN, &s_edge_vy);
+            if (s_edge_vx > 0.05 || s_edge_vy > 0.05) s_moved = 1;
         }
         if (s_moved) {
             double sx, sy;
             if (abs_move) { sx = s_vx; sy = s_vy; }
-            else { world_to_screen(s_wx, s_wz, &sx, &sy); sx += mvx; sy += mvy; }
+            else { world_to_screen(s_wx, s_wz, &sx, &sy); sx += fx; sy += fy; }
             /* stay on the map picture; pushing against an edge lets the camera follow */
             /* the camera keeps the cursor within x 52..268, y 81..137: a push (not a drift) past that holds */
             if (!abs_move) edge_push(sx < BM_FOLLOW_X0, sx > BM_FOLLOW_X1, sy < BM_FOLLOW_Y0, sy > BM_FOLLOW_Y1, mvx, mvy, 3.0);
@@ -727,6 +765,11 @@ void mouse_update(void) {
             if (sy > PANEL_Y - 1) sy = PANEL_Y - 1;
             double wx, wz;
             if (screen_to_world(sx, sy, &wx, &wz)) {
+                if (!abs_move && s_edge_bits) {       /* held edge: the faster of push and Cursor Speed */
+                    double v = (s32)rd32(RAM_CUR_SPEED) / 8192.0;   /* screen left / up = world -x / -z */
+                    edge_max(&wx, s_wx, v, B_LEFT, B_RIGHT);
+                    edge_max(&wz, s_wz, v, B_UP, B_DOWN);
+                }
                 if (wx < 0) wx = 0;
                 if (wz < 0) wz = 0;
                 if (wx > MAP_SIZE - 1) wx = MAP_SIZE - 1;
@@ -776,17 +819,32 @@ void mouse_update(void) {
             s_wx = (s32)gx / 8192.0; s_wz = (s32)gz / 8192.0;
             s_wr_x = gx; s_wr_z = gz; s_map_valid = 1;
             double sx, sy; smap_to_screen(s_wx, s_wz, &sx, &sy); warp_os_pointer(sx, sy);
-            s_moved = 0;
+            if (!s_edge_bits) s_moved = 0;            /* a held edge: that was our own D-pad, push on */
+        }
+        double fx = mvx, fy = mvy;
+        if (!abs_move) {                              /* held edge: the push is smoothed, and it coasts */
+            edge_smooth(&fx, B_LEFT, B_RIGHT, &s_edge_vx);
+            edge_smooth(&fy, B_UP, B_DOWN, &s_edge_vy);
+            if (s_edge_vx > 0.05 || s_edge_vy > 0.05) s_moved = 1;
         }
         if (s_moved) {
             double sx, sy, wx, wz;
             if (abs_move) { sx = s_vx; sy = s_vy; }
-            else { smap_to_screen(s_wx, s_wz, &sx, &sy); sx += mvx; sy += mvy; }
+            else { smap_to_screen(s_wx, s_wz, &sx, &sy); sx += fx; sy += fy; }
             if (sy < 0) sy = 0;
             if (sy > disp_h() - 1) sy = disp_h() - 1;
             smap_to_world(sx, sy, &wx, &wz);
             /* a little past the camera box: the game's camera follows, so pushing on scrolls */
             double cu, cv; smap_cam(&cu, &cv);
+            if (!abs_move && s_edge_bits) {           /* held edge: the faster of push and Cursor Speed */
+                double v = (s32)rd32(RAM_CUR_SPEED) / 8192.0;
+                edge_max(&wx, s_wx, v, B_LEFT, B_RIGHT);
+                edge_max(&wz, s_wz, v, B_UP, B_DOWN);
+            }
+            if (!abs_move) {                          /* ease into the edge (columns per frame) */
+                smap_ease(&wx, s_wx, cu - SMAP_U - 0.4, cu + SMAP_U + 0.4);
+                smap_ease(&wz, s_wz, cv + SMAP_V0 - 0.3, cv + SMAP_V1 + 0.3);
+            }
             if (!abs_move) edge_push(wx <= cu - SMAP_U - 0.4, wx >= cu + SMAP_U + 0.4,
                                      wz <= cv + SMAP_V0 - 0.3, wz >= cv + SMAP_V1 + 0.3, mvx, mvy, 0.5);
             if (wx < cu - SMAP_U - 0.4) wx = cu - SMAP_U - 0.4;

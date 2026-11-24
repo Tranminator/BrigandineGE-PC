@@ -18,7 +18,7 @@ Ghi lại toàn bộ phần chuột (PR #8, #9, #11, #13) và các phím tắt l
 
 - Chuột tự nhả ra khi mở F2 hoặc khi cửa sổ game mất focus.
 - Nút **?** cạnh ô Mouse control mở bảng tóm tắt cách dùng chuột.
-- **Cursor Speed** trong OPTION của game không ảnh hưởng tốc độ con trỏ chuột. Nó chỉ quyết định tốc độ cuộn bản đồ khi chuột ép vào mép (xem phần Bản đồ).
+- **Cursor Speed** trong OPTION của game không ảnh hưởng tốc độ con trỏ chuột. Nó chỉ quyết định tốc độ cuộn bản đồ tối thiểu khi chuột ép vào mép (xem phần Bản đồ).
 
 ## Nút chuột chung
 
@@ -40,7 +40,7 @@ Ghi lại toàn bộ phần chuột (PR #8, #9, #11, #13) và các phím tắt l
 |---|---|
 | Bản đồ trận đánh | Rê tới ô nào là con trỏ đặt lên ô đó; click để chọn. Chọn ô đi (MOVE) và mục tiêu tấn công / phép làm giống vậy. |
 | Bản đồ chiến lược | Cây bút đi theo chuột; click vào lâu đài để mở menu lâu đài. |
-| Cuộn bản đồ (cả hai loại) | Đẩy chuột ra mép thì camera đi theo. Đẩy dứt khoát tới vùng camera bám thì coi như đang giữ phím hướng: dừng tay bản đồ vẫn cuộn tiếp theo Cursor Speed; kéo ngược lại một chút (hoặc click) là dừng. Đẩy vào góc thì cuộn chéo. |
+| Cuộn bản đồ (cả hai loại) | Đẩy chuột ra mép thì camera đi theo. Đẩy dứt khoát tới vùng camera bám thì coi như đang giữ phím hướng: tiếp tục đẩy thì cuộn theo tốc độ tay (Pointer speed) nếu nhanh hơn Cursor Speed, không thì theo Cursor Speed; dừng tay bản đồ giảm dần về Cursor Speed rồi cuộn tiếp; kéo ngược lại một chút (hoặc click) là dừng. Đẩy vào góc thì cuộn chéo. Bản đồ chiến lược: chuột đi nhanh tới mép sẽ chậm dần vào mép thay vì dừng gắt. |
 | Mở Start menu | Chuột phải trên bản đồ (khi con trỏ tự do), hoặc nút bên của chuột. |
 
 ### Menu và danh sách

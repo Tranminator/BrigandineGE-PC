@@ -744,12 +744,18 @@ void mouse_update(void) {
             s_wx = (s32)gx / 8192.0; s_wz = (s32)gz / 8192.0 - 0.5;
             s_wr_x = gx; s_wr_z = gz; s_map_valid = 1;
             double sx, sy; world_to_screen(s_wx, s_wz, &sx, &sy); warp_os_pointer(sx, sy);
-            s_moved = 0;
+            if (!s_edge_bits) s_moved = 0;            /* a held edge: that was our own D-pad, push on */
+        }
+        double fx = mvx, fy = mvy;
+        if (!abs_move) {                              /* held edge: the push is smoothed, and it coasts */
+            edge_smooth(&fx, B_LEFT, B_RIGHT, &s_edge_vx);
+            edge_smooth(&fy, B_UP, B_DOWN, &s_edge_vy);
+            if (s_edge_vx > 0.05 || s_edge_vy > 0.05) s_moved = 1;
         }
         if (s_moved) {
             double sx, sy;
             if (abs_move) { sx = s_vx; sy = s_vy; }
-            else { world_to_screen(s_wx, s_wz, &sx, &sy); sx += mvx; sy += mvy; }
+            else { world_to_screen(s_wx, s_wz, &sx, &sy); sx += fx; sy += fy; }
             /* stay on the map picture; pushing against an edge lets the camera follow */
             /* the camera keeps the cursor within x 52..268, y 81..137: a push (not a drift) past that holds */
             if (!abs_move) edge_push(sx < BM_FOLLOW_X0, sx > BM_FOLLOW_X1, sy < BM_FOLLOW_Y0, sy > BM_FOLLOW_Y1, mvx, mvy, 3.0);
@@ -759,6 +765,11 @@ void mouse_update(void) {
             if (sy > PANEL_Y - 1) sy = PANEL_Y - 1;
             double wx, wz;
             if (screen_to_world(sx, sy, &wx, &wz)) {
+                if (!abs_move && s_edge_bits) {       /* held edge: the faster of push and Cursor Speed */
+                    double v = (s32)rd32(RAM_CUR_SPEED) / 8192.0;   /* screen left / up = world -x / -z */
+                    edge_max(&wx, s_wx, v, B_LEFT, B_RIGHT);
+                    edge_max(&wz, s_wz, v, B_UP, B_DOWN);
+                }
                 if (wx < 0) wx = 0;
                 if (wz < 0) wz = 0;
                 if (wx > MAP_SIZE - 1) wx = MAP_SIZE - 1;

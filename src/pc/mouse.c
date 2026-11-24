@@ -534,6 +534,20 @@ static void smap_to_screen(double wx, double wz, double *sx, double *sy) {
  * A fast pointer that ran straight into the edge stopped dead there and only then crawled on with the
  * scroll, which read as a stall. Near the edge the outward step is cut down step by step to that scroll
  * speed instead (a quarter of the distance left, plus the scroll speed), so the pointer slows into it */
+/* at a held edge the scroll is Cursor Speed plus the outward push. A hand never pushes evenly (and mouse
+ * reports land unevenly in frames), so the raw push made the camera jump between its slowest and fastest
+ * every frame. The push is smoothed instead (about 0.15 s): pushing harder still scrolls faster, but the
+ * speed changes gently, and when the hand stops it eases back to Cursor Speed */
+static double s_edge_vx, s_edge_vy;
+static void edge_smooth(double *mv, u16 neg, u16 pos, double *v) {
+    int held = s_edge_bits & (neg | pos);
+    if (!held) { *v = 0; return; }
+    double out = (s_edge_bits & neg) ? (*mv < 0 ? -*mv : 0) : (*mv > 0 ? *mv : 0);
+    if (*v == 0) *v = out;                     /* just reached the edge: carry on at the push */
+    else *v += (out - *v) * 0.12;
+    if (*v < 0.01) *v = 0;
+    *mv = (s_edge_bits & neg) ? -*v : *v;
+}
 #define SMAP_EDGE_V 0.3
 static void smap_ease(double *w, double from, double lo, double hi) {
     double step = *w - from;
@@ -786,12 +800,18 @@ void mouse_update(void) {
             s_wx = (s32)gx / 8192.0; s_wz = (s32)gz / 8192.0;
             s_wr_x = gx; s_wr_z = gz; s_map_valid = 1;
             double sx, sy; smap_to_screen(s_wx, s_wz, &sx, &sy); warp_os_pointer(sx, sy);
-            s_moved = 0;
+            if (!s_edge_bits) s_moved = 0;            /* a held edge: that was our own D-pad, push on */
+        }
+        double fx = mvx, fy = mvy;
+        if (!abs_move) {                              /* held edge: the push is smoothed, and it coasts */
+            edge_smooth(&fx, B_LEFT, B_RIGHT, &s_edge_vx);
+            edge_smooth(&fy, B_UP, B_DOWN, &s_edge_vy);
+            if (s_edge_vx > 0.05 || s_edge_vy > 0.05) s_moved = 1;
         }
         if (s_moved) {
             double sx, sy, wx, wz;
             if (abs_move) { sx = s_vx; sy = s_vy; }
-            else { smap_to_screen(s_wx, s_wz, &sx, &sy); sx += mvx; sy += mvy; }
+            else { smap_to_screen(s_wx, s_wz, &sx, &sy); sx += fx; sy += fy; }
             if (sy < 0) sy = 0;
             if (sy > disp_h() - 1) sy = disp_h() - 1;
             smap_to_world(sx, sy, &wx, &wz);

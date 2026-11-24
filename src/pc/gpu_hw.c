@@ -795,6 +795,17 @@ int hw_display_texture(unsigned *tex, int *w, int *h, int show_vram) {
         glBindFramebuffer(GL_READ_FRAMEBUFFER, s_wide_fbo);
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, s_disp_fbo);
         glBlitFramebuffer(0, g_gpu.disp_y * S, tw, (g_gpu.disp_y + 240) * S, 0, 0, tw, th, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        extern int g_ws_mask_y;   /* the sides beside a 320-wide panel: black */
+        if (g_ws_mask_y > 0 && g_ws_mask_y < 240) {
+            glBindFramebuffer(GL_FRAMEBUFFER, s_disp_fbo);
+            glEnable(GL_SCISSOR_TEST);
+            glClearColor(0, 0, 0, 1);
+            glScissor(0, g_ws_mask_y * S, E * S, (240 - g_ws_mask_y) * S);
+            glClear(GL_COLOR_BUFFER_BIT);
+            glScissor((E + WS_BUF_W) * S, g_ws_mask_y * S, E * S, (240 - g_ws_mask_y) * S);
+            glClear(GL_COLOR_BUFFER_BIT);
+            glDisable(GL_SCISSOR_TEST);
+        }
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         *tex = s_disp; *w = tw; *h = th;
         s_last_wide = 1;

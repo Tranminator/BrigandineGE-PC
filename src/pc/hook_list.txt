@@ -16,3 +16,5 @@ ov1:0x800CF8A8   # strategy: NAME letter grid, per frame
 !0x8004C64C      # "Insert disk N" routine: replaced (hle_cd.c) - the disc image is swapped in, no screen
 0x800566BC       # DivideFT4 (PsyQ): widescreen widens its clip width (widescreen.c)
 ov1:0x800C3D58   # strategy map terrain draw: widescreen screen detection (widescreen.c)
+0x8002727C       # battle map tile draw: widescreen screen detection (widescreen.c)
+!ov2:0x800B95D0  # battle camera follow: widened for the wide battle map (widescreen.c)

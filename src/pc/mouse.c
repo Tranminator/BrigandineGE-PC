@@ -439,6 +439,7 @@ void mouse_set_view(int x, int y, int w, int h, float px_per_pt) {
 }
 
 static double disp_w(void) { return g_gpu.disp_w > 0 ? g_gpu.disp_w : 320; }
+int ws_battle_extra(void);   /* widescreen.c: the battle map shown wide, E pixels each side */
 static double disp_h(void) { return g_gpu.disp_h > 0 ? g_gpu.disp_h : 240; }
 
 /* window point <-> display pixel */
@@ -446,7 +447,8 @@ static int pt_to_display(double x, double y, double *dx, double *dy) {
     if (s_view_w <= 0 || s_view_h <= 0) return 0;
     double px = x * s_px_per_pt - s_view_x, py = y * s_px_per_pt - s_view_y;
     *dx = px * disp_w() / s_view_w; *dy = py * disp_h() / s_view_h;
-    return px >= 0 && py >= 0 && px < s_view_w && py < s_view_h;
+    double ex = ws_battle_extra() * s_view_w / disp_w();   /* a wide battle map: its sides too */
+    return px >= -ex && py >= 0 && px < s_view_w + ex && py < s_view_h;
 }
 static void display_to_pt(double dx, double dy, float *x, float *y) {
     *x = (float)((s_view_x + dx * s_view_w / disp_w()) / s_px_per_pt);
@@ -758,9 +760,11 @@ void mouse_update(void) {
             else { world_to_screen(s_wx, s_wz, &sx, &sy); sx += fx; sy += fy; }
             /* stay on the map picture; pushing against an edge lets the camera follow */
             /* the camera keeps the cursor within x 52..268, y 81..137: a push (not a drift) past that holds */
-            if (!abs_move) edge_push(sx < BM_FOLLOW_X0, sx > BM_FOLLOW_X1, sy < BM_FOLLOW_Y0, sy > BM_FOLLOW_Y1, mvx, mvy, 3.0);
-            if (sx < 0) sx = 0;
-            if (sx > disp_w() - 1) sx = disp_w() - 1;
+            /* a wide battle map: the picture and the camera's box are E wider each side (widescreen.c) */
+            double ex = ws_battle_extra();
+            if (!abs_move) edge_push(sx < BM_FOLLOW_X0 - ex, sx > BM_FOLLOW_X1 + ex, sy < BM_FOLLOW_Y0, sy > BM_FOLLOW_Y1, mvx, mvy, 3.0);
+            if (sx < -ex) sx = -ex;
+            if (sx > disp_w() - 1 + ex) sx = disp_w() - 1 + ex;
             if (sy < 0) sy = 0;
             if (sy > PANEL_Y - 1) sy = PANEL_Y - 1;
             double wx, wz;

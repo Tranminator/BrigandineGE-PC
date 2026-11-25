@@ -526,8 +526,8 @@ static int menu_item_row(double py) {
 #define SMAP_V0 -2.59
 #define SMAP_V1 2.19
 /* the camera box half width in columns: wider on the wide strategy map (its follow box is widened by
- * E pixels at the camera's depth, ~32 px a column: widescreen.c) */
-static double smap_u(void) { return 3.22 * (103.0 + ws_pointer_extra()) / 103.0; }
+ * E pixels on its nearest row, ~40 px a column: widescreen.c) */
+static double smap_u(void) { return 3.22 * (129.0 + ws_pointer_extra()) / 129.0; }
 static double smap_s(double v) { return (0.26788293 * v + 3.09757407) * v + 32.06222178; }
 static double smap_y(double v) { return ((0.33245762 * v + 2.67249574) * v + 26.38856192) * v + 119.82098294; }
 static void smap_cam(double *cu, double *cv) { *cu = (s32)rd32(RAM_CAM_X) / 32.0; *cv = (s32)rd32(RAM_CAM_Z) / 32.0; }

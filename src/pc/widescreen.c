@@ -20,7 +20,7 @@
 #include "settings.h"
 
 #define OVL_ID_ADDR  0x800B6838u
-#define WS_SMAP_BOX_PX 103   /* the strategy camera box half width at the camera depth (3.22 columns) */
+#define WS_SMAP_BOX_PX 129   /* the strategy camera box half width on its nearest row (3.22 columns x ~40 px) */
 
 int g_ws_screen;                   /* this frame's screen draws past its 320 pixels */
 int g_ws_mask_y;                   /* > 0: the wide sides from this line down are blacked out (gpu_hw.c) */
@@ -164,7 +164,8 @@ s32 ws_imm(u32 addr, s32 value) {
     u32 ovl = rd32(OVL_ID_ADDR);
     if (addr >= 0x800B0000u) {                        /* strategy map camera follow box (ov1) */
         if (ovl != 5 || !g_ws_extra) return value;
-        /* the box is +-3.22 columns, ~103 px at the camera's depth (32 px a column): E px more */
+        /* the box is +-3.22 columns: ~129 px on its nearest (most magnified, ~40 px a column) row, where
+         * the quill drawn right of its tip needs the room it has at 4:3: E px more there, less above */
         return (s32)((s64)value * (WS_SMAP_BOX_PX + g_ws_extra) / WS_SMAP_BOX_PX);
     }
     if (!s_clip_wide || ovl != 6) return value;

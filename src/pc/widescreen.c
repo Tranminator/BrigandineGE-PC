@@ -22,6 +22,7 @@
 #define OVL_ID_ADDR  0x800B6838u
 
 int g_ws_screen;                   /* this frame's screen draws past its 320 pixels */
+int g_ws_flat;                     /* the wide battle map in its top-down view (gpu.c / gpu_hw.c) */
 int g_ws_mask_y;                   /* > 0: the wide sides from this line down are blacked out (gpu_hw.c) */
 
 static const int k_extra[] = { 0, 53, 32 };   /* off, 16:9 (426x240), 16:10 (384x240) */
@@ -34,7 +35,8 @@ static unsigned s_vb, s_terrain_seen = 0x80000000u;
 void hook_f_ov1_800C3D58(Ctx *c) { (void)c; s_terrain_seen = s_vb; }   /* strategy map terrain draw */
 static int s_view_wide;            /* E written into the view rectangle (0 = original) */
 static unsigned s_tiles_seen = 0x80000000u;
-void hook_f_main_8002727C(Ctx *c) { (void)c; s_tiles_seen = s_vb; }   /* battle map tile draw */
+static unsigned s_flat_seen = 0x80000000u;   /* the top-down view (16x16 tiles) */
+void hook_f_main_8002727C(Ctx *c) { (void)c; s_tiles_seen = s_flat_seen = s_vb; }   /* battle map tile draw */
 void hook_f_main_80027810(Ctx *c) { (void)c; if (rd32(OVL_ID_ADDR) == 6) s_tiles_seen = s_vb; }   /* the same, tilted */
 
 /* battle map: the tile map's column clip (x min / max, s32), widened by E */
@@ -85,6 +87,7 @@ void ws_frame(void) {
     int battle = g_ws_extra && ovl == 6 && s_vb - s_tiles_seen <= 3;
     if (battle) g_ws_screen = 1;
     g_ws_mask_y = battle ? BATTLE_PANEL_Y : 0;
+    g_ws_flat = battle && s_vb - s_flat_seen <= 3;
     set_view_rect(g_ws_screen ? g_ws_extra : 0);
     set_tile_clip(battle ? g_ws_extra : 0);
 }
@@ -129,27 +132,5 @@ int hook_f_ov2_800B95D0(Ctx *c) {
     ac = (s32)rd32(0x800A67AC);
     v1 = (hi << 8) + ac;
     if (v1 < cx) wr32(0x800A67AC, (u32)(ac + (cx - v1)));
-    return 1;
-}
-
-/* Battle camera clamp (overlay func 800B96F4, replaced on the wide battle map): the camera stays
- * inside the map. Its x limit is (view x + 160) / 3 + 160: 160 (half the picture) at 4:3 in both
- * views, but with the widened view rectangle only 143. Top-down nothing is drawn past the map edge,
- * so the wide picture showed leftovers there, and switching views (key 3) at an edge slid the camera
- * between two limits. Both views now use 160 + E, the wide picture's half width (as 4:3 uses 160 for
- * both). The z part is the original. */
-int hook_f_ov2_800B96F4(Ctx *c) {
-    (void)c;
-    if (!g_ws_screen || rd32(OVL_ID_ADDR) != 6 || !s_clip_wide) return 0;
-    s32 vy = (s16)rd16(RAM_VIEW_RECT + 8 + 2), vh = (s16)rd16(RAM_VIEW_RECT + 8 + 6);   /* 0x800A6748 */
-    s32 b0 = (s32)rd32(0x800A67B0);
-    s32 zmin = (0x78 - (vy + 0x78) / 2) << 8;
-    if (b0 < zmin) { b0 = zmin; wr32(0x800A67B0, (u32)b0); }
-    s32 zmax = (0x42F - (vy + vh)) << 8;
-    if (zmax < b0) wr32(0x800A67B0, (u32)zmax);
-    s32 xmin = (160 + s_clip_wide) << 8, xmax = 0x41F00 - xmin;
-    s32 ac = (s32)rd32(0x800A67AC);
-    if (ac < xmin) { ac = xmin; wr32(0x800A67AC, (u32)ac); }
-    if (xmax < ac) wr32(0x800A67AC, (u32)xmax);
     return 1;
 }

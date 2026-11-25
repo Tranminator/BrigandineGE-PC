@@ -37,6 +37,7 @@ int  hw_debug_dump(const char *dir);     /* F10: scaled vs software VRAM images 
 int  hw_display_texture(unsigned *tex, int *w, int *h, int show_vram);
 int  hw_display_is_wide(void);           /* the last display texture was the wide canvas */
 extern int g_ws_extra;                   /* widescreen: extra native pixels each side (0 = off) */
+void hw_flat_tile(int buf, int x);     /* a top-down battle map tile drawn in display buffer buf (0/1) at x */
 void hw_panel_extended(void);           /* the wide battle panel was drawn full width (no black sides) */
 
 #ifdef __cplusplus

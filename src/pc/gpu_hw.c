@@ -785,6 +785,15 @@ int hw_debug_dump(const char *dir) {
 int hw_display_is_wide(void) { return s_last_wide; }
 static unsigned s_disp_n, s_panel_n = 0x80000000u;
 void hw_panel_extended(void) { s_panel_n = s_disp_n; }
+/* top-down battle map: the x range its tiles covered in each display buffer. Past the map edge nothing
+ * is drawn (the camera stops where the 4:3 picture meets the edge), so on the wide picture those parts
+ * are blacked out. A buffer's range starts over with its first tile after it was shown. */
+static struct { int x0, x1, stale, valid; } s_flat[2];
+void hw_flat_tile(int buf, int x) {
+    if (s_flat[buf].stale || !s_flat[buf].valid) { s_flat[buf].x0 = x; s_flat[buf].x1 = x + 16; s_flat[buf].stale = 0; s_flat[buf].valid = 1; }
+    if (x < s_flat[buf].x0) s_flat[buf].x0 = x;
+    if (x + 16 > s_flat[buf].x1) s_flat[buf].x1 = x + 16;
+}
 
 int hw_display_texture(unsigned *tex, int *w, int *h, int show_vram) {
     if (!ready()) return 0;
@@ -817,6 +826,18 @@ int hw_display_texture(unsigned *tex, int *w, int *h, int show_vram) {
             glClear(GL_COLOR_BUFFER_BIT);
             glDisable(GL_SCISSOR_TEST);
         }
+        extern int g_ws_flat;
+        int fb = g_gpu.disp_y >= 240;
+        if (g_ws_flat && s_flat[fb].valid && g_ws_mask_y > 2) {   /* top-down: past the map edge, black */
+            int my = g_ws_mask_y - 2, l = s_flat[fb].x0 + E, r = s_flat[fb].x1 + E;   /* canvas x */
+            glBindFramebuffer(GL_FRAMEBUFFER, s_disp_fbo);
+            glEnable(GL_SCISSOR_TEST);
+            glClearColor(0, 0, 0, 1);
+            if (l > 0) { glScissor(0, 0, l * S, my * S); glClear(GL_COLOR_BUFFER_BIT); }
+            if (r < WS_BUF_W + 2 * E) { glScissor(r * S, 0, (WS_BUF_W + 2 * E - r) * S, my * S); glClear(GL_COLOR_BUFFER_BIT); }
+            glDisable(GL_SCISSOR_TEST);
+        }
+        s_flat[fb].stale = 1;
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         *tex = s_disp; *w = tw; *h = th;
         s_last_wide = 1;

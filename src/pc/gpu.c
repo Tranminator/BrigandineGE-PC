@@ -9,7 +9,8 @@
 u16 g_vram[VRAM_W * VRAM_H];
 GpuState g_gpu;
 int g_gpu_skip_draw;
-int g_gpu_dump;   /* debug: log every GP0 packet while set (BRIG_GPUDUMP=<vblank>) */
+int g_gpu_dump;
+extern int g_ws_mask_y;   /* widescreen.c: the wide battle map (its panel top + 2), else 0 */   /* debug: log every GP0 packet while set (BRIG_GPUDUMP=<vblank>) */
 
 static inline int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
@@ -243,6 +244,10 @@ void gpu_gp0_packet(const u32 *w, int n) {
             for (int i = 0; i < nv; i++) { hv[i].x = v[i].x; hv[i].y = v[i].y; hv[i].r = v[i].r; hv[i].g = v[i].g;
                                            hv[i].b = v[i].b; hv[i].u = v[i].u; hv[i].v = v[i].v; }
             hw_poly(hv, nv, gour, tex, raw, semi, tp, clut);
+            /* ... and on to the right after its last piece (x 256..320, u 0..64): u 64..128 from x 320 */
+            if (g_ws_mask_y && quad && tex && v[0].x == 256 && v[0].y % 240 == g_ws_mask_y - 2 && v[3].x == 320 &&
+                v[3].y == v[0].y + 48 && v[0].u == 0 && v[1].u == 64)
+                hw_rect(320, v[0].y, 64, 48, v[0].r, v[0].g, v[0].b, tex, raw, semi, 64, v[0].v, clut);
         }
         draw_tri(v[0], v[1], v[2], gour, tex, raw, semi, tp, clut);
         if (quad) draw_tri(v[1], v[2], v[3], gour, tex, raw, semi, tp, clut);
@@ -287,6 +292,12 @@ void gpu_gp0_packet(const u32 *w, int n) {
         else if (sz == 2) ww = hh = 8;
         else ww = hh = 16;
         hw_rect(x, y, ww, hh, w[0] & 255, (w[0] >> 8) & 255, (w[0] >> 16) & 255, tex, raw, semi, u, v, clut);
+        /* wide battle map: the panel's stone background (128x48 tiles from x 0, in either display buffer)
+         * goes on to the left */
+        if (g_hw_on && g_ws_mask_y && tex && x == 0 && y % 240 == g_ws_mask_y - 2 && ww == 128 && hh == 48 && u == 0) {
+            hw_rect(-128, y, 128, hh, w[0] & 255, (w[0] >> 8) & 255, (w[0] >> 16) & 255, tex, raw, semi, u, v, clut);
+            hw_panel_extended();
+        }
         draw_rect(x, y, ww, hh, w[0] & 255, (w[0] >> 8) & 255, (w[0] >> 16) & 255, tex, raw, semi, u, v, clut);
         return;
     }

@@ -20,6 +20,7 @@
 #include "settings.h"
 
 #define OVL_ID_ADDR  0x800B6838u
+#define WS_SMAP_BOX_PX 103   /* the strategy camera box half width at the camera depth (3.22 columns) */
 
 int g_ws_screen;                   /* this frame's screen draws past its 320 pixels */
 int g_ws_mask_y;                   /* > 0: the wide sides from this line down are blacked out (gpu_hw.c) */
@@ -159,6 +160,20 @@ int hook_f_ov2_800B96F4(Ctx *c) {
  * the right, so with the map edge between 320 and 320 + E nothing filled the wide side. On the wide
  * battle map those constants move out by E. */
 s32 ws_imm(u32 addr, s32 value) {
-    if (!g_ws_screen || !s_clip_wide || rd32(OVL_ID_ADDR) != 6) return value;
+    if (!g_ws_screen) return value;
+    u32 ovl = rd32(OVL_ID_ADDR);
+    if (addr >= 0x800B0000u) {                        /* strategy map camera follow box (ov1) */
+        if (ovl != 5 || !g_ws_extra) return value;
+        /* the box is +-3.22 columns, ~103 px at the camera's depth (32 px a column): E px more */
+        return (s32)((s64)value * (WS_SMAP_BOX_PX + g_ws_extra) / WS_SMAP_BOX_PX);
+    }
+    if (!s_clip_wide || ovl != 6) return value;
     return addr < 0x80028040u ? value - s_clip_wide : value + s_clip_wide;   /* left part, then right */
+}
+
+/* the screen shown wide where the pointer goes past the 320 pixels: E pixels each side, else 0 */
+int ws_pointer_extra(void) {
+    if (!g_ws_screen) return 0;
+    u32 ovl = rd32(OVL_ID_ADDR);
+    return ovl == 6 ? s_clip_wide : ovl == 5 ? g_ws_extra : 0;
 }

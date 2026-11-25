@@ -89,7 +89,7 @@ stretch or native 1x (320×240 in the middle). `F2` → **Graphics** also has Di
 (1x = the original 320×240 up to 4x; at 1x / 2x the window grows while `F2` is open).
 **Widescreen** (`F2` → Graphics, 16:9 or 16:10, needs an internal resolution of 2x or more): the strategy map
 and the battle map show more at the sides, drawn by the game itself (no stretching; the interface stays 4:3 in
-the middle). On the battle map the mouse and the camera use the whole width. Menus, unit screens and other
+the middle). On both maps the mouse and the camera use the whole width. Menus, unit screens and other
 screens stay 4:3. `F5` quick save, `F9` quick load (see below). `F1` shows all of VRAM (debug). Hold `Tab` to fast-forward.
 
 Settings: press `F2` (mouse, keyboard or controller; `F2`/`Esc` closes and saves). Game input is

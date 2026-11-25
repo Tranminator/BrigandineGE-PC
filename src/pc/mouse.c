@@ -440,6 +440,7 @@ void mouse_set_view(int x, int y, int w, int h, float px_per_pt) {
 
 static double disp_w(void) { return g_gpu.disp_w > 0 ? g_gpu.disp_w : 320; }
 int ws_battle_extra(void);   /* widescreen.c: the battle map shown wide, E pixels each side */
+int ws_pointer_extra(void);  /* widescreen.c: a wide map (battle or strategy), E pixels each side */
 static double disp_h(void) { return g_gpu.disp_h > 0 ? g_gpu.disp_h : 240; }
 
 /* window point <-> display pixel */
@@ -447,7 +448,7 @@ static int pt_to_display(double x, double y, double *dx, double *dy) {
     if (s_view_w <= 0 || s_view_h <= 0) return 0;
     double px = x * s_px_per_pt - s_view_x, py = y * s_px_per_pt - s_view_y;
     *dx = px * disp_w() / s_view_w; *dy = py * disp_h() / s_view_h;
-    double ex = ws_battle_extra() * s_view_w / disp_w();   /* a wide battle map: its sides too */
+    double ex = ws_pointer_extra() * s_view_w / disp_w();   /* a wide map: its sides too */
     return px >= -ex && py >= 0 && px < s_view_w + ex && py < s_view_h;
 }
 static void display_to_pt(double dx, double dy, float *x, float *y) {
@@ -521,9 +522,12 @@ static int menu_item_row(double py) {
  * u = x - camX / 32, v = z - camZ / 32 (world in 8192 units, camera from RAM), the game draws its
  * cursor (the quill's tip) at screen x = 160 + u * s(v), y = f(v); fitted to the quill sprite
  * (< 1 px). The camera keeps the cursor inside u in [-3.22, 3.22], v in [-2.59, 2.19]. */
-#define SMAP_U  3.22
+#define SMAP_U  smap_u()
 #define SMAP_V0 -2.59
 #define SMAP_V1 2.19
+/* the camera box half width in columns: wider on the wide strategy map (its follow box is widened by
+ * E pixels at the camera's depth, ~32 px a column: widescreen.c) */
+static double smap_u(void) { return 3.22 * (103.0 + ws_pointer_extra()) / 103.0; }
 static double smap_s(double v) { return (0.26788293 * v + 3.09757407) * v + 32.06222178; }
 static double smap_y(double v) { return ((0.33245762 * v + 2.67249574) * v + 26.38856192) * v + 119.82098294; }
 static void smap_cam(double *cu, double *cv) { *cu = (s32)rd32(RAM_CAM_X) / 32.0; *cv = (s32)rd32(RAM_CAM_Z) / 32.0; }

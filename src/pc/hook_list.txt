@@ -32,3 +32,7 @@ imm:0x800280A4   # slti 0x140
 imm:0x800280B4   # right bound 320
 imm:0x80028108   # slti 0x140
 imm:0x80028170   # right bound 320
+# strategy map camera follow (ov1 800B88C0): its x box, -0x4E00 / 0x4D40 over the zoom, widened on the
+# wide strategy map so the quill reaches the sides before the camera moves (ws_imm, widescreen.c)
+imm:ov1:0x800B895C   # left bound -0x4E00
+imm:ov1:0x800B8994   # right bound 0x4D40

@@ -20,3 +20,15 @@ ov1:0x800C3D58   # strategy map terrain draw: widescreen screen detection (wides
 !ov2:0x800B95D0  # battle camera follow: widened for the wide battle map (widescreen.c)
 0x80027810       # battle map terrain draw (polygon mode, zoomed): widescreen screen detection (widescreen.c)
 !ov2:0x800B96F4  # battle camera clamp: the wide top-down battle map stays inside the map (widescreen.c)
+# battle map, tilted view: the sky / map side fills past the map edge are made for x -1..320 (main
+# 80027EC8..80028170); on the wide battle map their bounds and tests move out by E (ws_imm, widescreen.c)
+imm:0x80027F04   # blez: left fill only if the edge is right of x 0
+imm:0x80027F30   # bltz
+imm:0x80027F38   # left bound -1
+imm:0x80027F98   # bltz
+imm:0x80028000   # left bound -1
+imm:0x80028074   # slti 0x13F: right fill only if the edge is left of x 319
+imm:0x800280A4   # slti 0x140
+imm:0x800280B4   # right bound 320
+imm:0x80028108   # slti 0x140
+imm:0x80028170   # right bound 320

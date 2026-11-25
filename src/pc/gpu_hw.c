@@ -64,9 +64,6 @@ static const char VS[] =
     "  vec2 q = a_pos;\n"
     /* screen-wide untextured primitives (gradients, fades): their x 0 / 320 edges reach the canvas edges */
     "  if (u_wide > 0.0 && ((a_info.x >> 16) & 16u) != 0u) { if (q.x <= 0.0) q.x -= u_wide; else if (q.x >= 320.0) q.x += u_wide; }\n"
-    /* untextured fills the game cut at the 4:3 screen edge, x -1/0 or 320/321 (battle map sky / map side):
-     * only those corners */
-    "  if (u_wide > 0.0 && ((a_info.x >> 16) & 32u) != 0u) { if (q.x == 0.0 || q.x == -1.0) q.x -= u_wide; else if (q.x == 320.0 || q.x == 321.0) q.x += u_wide; }\n"
     "  vec2 p = (q + u_xf.xy) / u_xf.zw * 2.0 - 1.0;\n"
     "  gl_Position = vec4(p, 0.0, 1.0);\n"
     "  v_col = a_col; v_uv = a_uv; v_info = a_info;\n"
@@ -580,10 +577,6 @@ void hw_poly(const HwV *v, int nv, int gouraud, int textured, int raw, int semi,
         int mnx = v[0].x, mxx = v[0].x;
         for (int i = 1; i < nv; i++) { if (v[i].x < mnx) mnx = v[i].x; if (v[i].x > mxx) mxx = v[i].x; }
         if (mnx <= 0 && mxx >= 320) flags |= 16u;
-        else {                                     /* wide battle map: corners cut at the screen edge */
-            extern int g_ws_mask_y;
-            for (int i = 0; i < nv && g_ws_mask_y; i++) if (v[i].x == -1 || v[i].x == 0 || v[i].x == 320 || v[i].x == 321) flags |= 32u;
-        }
     }
     u32 info[4] = { (tpage & 0x1FF) | (flags << 16), clut & 0xFFFF, tw_bits(),
                     (u32)umin | ((u32)vmin << 8) | ((u32)umax << 16) | ((u32)vmax << 24) };

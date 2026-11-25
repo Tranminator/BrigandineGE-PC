@@ -243,6 +243,9 @@ class FuncGen:
                     return f"{sg.fname(t)}_e(c);"
         return f"rt_call(c, 0x{t:08X}u);"
 
+    def imm_hooked(self, a):
+        return (self.seg.sid, a) in self.ctx.get("imms", ())
+
     def simple(self, a, w):
         """Non-control-flow instruction -> C statement."""
         op, rs, rt, rd, sa, fn = w >> 26, (w >> 21) & 31, (w >> 16) & 31, (w >> 11) & 31, (w >> 6) & 31, w & 63
@@ -281,8 +284,12 @@ class FuncGen:
             if fn in S:
                 return S[fn]()
         elif op in (0x08, 0x09):
+            if self.imm_hooked(a):
+                return setreg(rt, f"{reg(rs)} + (u32)ws_imm(0x{a:08X}u, {simm})")
             return setreg(rt, f"{reg(rs)} + {simm}u" if simm >= 0 else f"{reg(rs)} - {-simm}u")
         elif op == 0x0A:
+            if self.imm_hooked(a):
+                return setreg(rt, f"(s32){reg(rs)} < ws_imm(0x{a:08X}u, {simm})")
             return setreg(rt, f"(s32){reg(rs)} < {simm}")
         elif op == 0x0B:
             return setreg(rt, f"{reg(rs)} < 0x{simm & 0xFFFFFFFF:X}u")
@@ -414,13 +421,14 @@ class FuncGen:
                 cond = f"{reg(rs)} == {reg(rt)}"
             elif op == 5:
                 cond = f"{reg(rs)} != {reg(rt)}"
-            elif op == 6:
-                cond = f"(s32){reg(rs)} <= 0"
+            zero = f"ws_imm(0x{a:08X}u, 0)" if self.imm_hooked(a) else "0"
+            if op == 6:
+                cond = f"(s32){reg(rs)} <= {zero}"
             elif op == 7:
-                cond = f"(s32){reg(rs)} > 0"
+                cond = f"(s32){reg(rs)} > {zero}"
             elif op == 1:
                 kind = rt & 0x11
-                cond = f"(s32){reg(rs)} {'<' if (rt & 1) == 0 else '>='} 0"
+                cond = f"(s32){reg(rs)} {'<' if (rt & 1) == 0 else '>='} {zero}"
                 if rt & 0x10:  # bltzal / bgezal
                     out.append(f"    {{ int t_ = {cond}; {R}[31] = 0x{ret:08X}u; {ds_c} if (t_) {{ {self.call_expr(tgt)} }} }}")
                     a += 8
@@ -503,10 +511,15 @@ def main():
         hle_names = {l.split("#")[0].strip() for l in open(hle_path)} - {""}
     hooks = set()   # functions that call hook_<name>(c) on entry (args readable, nothing replaced)
     overrides = set()   # "!" entries: int hook_<name>(c); non-zero = the function returns at once (replaced)
+    imms = set()   # "imm:" entries: instructions whose constant (addiu / slti, or the 0 of blez / bltz / bgtz / bgez) is ws_imm(addr, value)
     hook_path = os.path.join(ROOT, "src/pc/hook_list.txt")
     if os.path.exists(hook_path):
         for l in open(hook_path):
             l = l.split("#")[0].strip()
+            if l.startswith("imm:"):   # "imm:0x80028074": that instruction's constant comes from ws_imm()
+                sid, _, a = l[4:].rpartition(":")
+                imms.add((sid or "main", int(a, 16)))
+                continue
             if l:   # "0x80021EB8" (main EXE), "ov1:0x800CDB1C" (overlay), "!0x8004C64C" (override)
                 ov = l.startswith("!")
                 sid, _, a = l.lstrip("!").rpartition(":")
@@ -527,7 +540,7 @@ def main():
                     st.add(t)
         starts[s.sid] = st
     ctx = {"main": main_seg, "hle_by_addr": hle_by_addr, "starts": starts,
-           "data_ptrs": data_pointers(segs), "hooks": hooks, "overrides": overrides}
+           "data_ptrs": data_pointers(segs), "hooks": hooks, "overrides": overrides, "imms": imms}
     os.makedirs(OUT, exist_ok=True)
     protos, tables = [], []
     stats = {}
@@ -609,6 +622,7 @@ def main():
             f.write(f"void hook_f_{sid}_{a:08X}(Ctx *c);\n")
         for sid, a in sorted(overrides):
             f.write(f"int hook_f_{sid}_{a:08X}(Ctx *c);\n")
+        f.write("s32 ws_imm(u32 addr, s32 value);   /* hook_list imm: entries (widescreen.c) */\n")
     with open(os.path.join(OUT, "recomp_tables.c"), "w") as f:
         f.write('#include "recomp_funcs.h"\n')
         for sid, tab in tables:

@@ -153,3 +153,12 @@ int hook_f_ov2_800B96F4(Ctx *c) {
     if (xmax < ac) wr32(0x800A67AC, (u32)xmax);
     return 1;
 }
+
+/* hook_list "imm:" instructions: the battle map's sky / map side fills in the tilted view (main func
+ * around 80027EC8) are cut and tested at the 4:3 screen edges, x -1 / 0 on the left and 319 / 320 on
+ * the right, so with the map edge between 320 and 320 + E nothing filled the wide side. On the wide
+ * battle map those constants move out by E. */
+s32 ws_imm(u32 addr, s32 value) {
+    if (!g_ws_screen || !s_clip_wide || rd32(OVL_ID_ADDR) != 6) return value;
+    return addr < 0x80028040u ? value - s_clip_wide : value + s_clip_wide;   /* left part, then right */
+}

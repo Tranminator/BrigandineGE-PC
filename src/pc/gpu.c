@@ -10,7 +10,7 @@ u16 g_vram[VRAM_W * VRAM_H];
 GpuState g_gpu;
 int g_gpu_skip_draw;
 int g_gpu_dump;
-extern int g_ws_mask_y, g_ws_flat;   /* widescreen.c: the wide battle map (its panel top + 2), else 0 */   /* debug: log every GP0 packet while set (BRIG_GPUDUMP=<vblank>) */
+extern int g_ws_mask_y;   /* widescreen.c: the wide battle map (its panel top + 2), else 0 */   /* debug: log every GP0 packet while set (BRIG_GPUDUMP=<vblank>) */
 
 static inline int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
@@ -292,8 +292,6 @@ void gpu_gp0_packet(const u32 *w, int n) {
         else if (sz == 2) ww = hh = 8;
         else ww = hh = 16;
         hw_rect(x, y, ww, hh, w[0] & 255, (w[0] >> 8) & 255, (w[0] >> 16) & 255, tex, raw, semi, u, v, clut);
-        /* wide top-down battle map: where its 16x16 tiles are (outside them is past the map edge) */
-        if (g_hw_on && g_ws_flat && tex && ww == 16 && hh == 16 && y % 240 < g_ws_mask_y - 2) hw_flat_tile(y >= 240, x);
         /* wide battle map: the panel's stone background (128x48 tiles from x 0, in either display buffer)
          * goes on to the left */
         if (g_hw_on && g_ws_mask_y && tex && x == 0 && y % 240 == g_ws_mask_y - 2 && ww == 128 && hh == 48 && u == 0) {

@@ -10,7 +10,85 @@ u16 g_vram[VRAM_W * VRAM_H];
 GpuState g_gpu;
 int g_gpu_skip_draw;
 int g_gpu_dump;
-extern int g_ws_mask_y;   /* widescreen.c: the wide battle map (its panel top + 2), else 0 */   /* debug: log every GP0 packet while set (BRIG_GPUDUMP=<vblank>) */
+extern int g_ws_mask_y;
+void ws_rune_bg(void);   /* widescreen.c */
+void ws_bg_screen(void); /* widescreen.c: a full-screen background was drawn */
+
+/* Wide picture, menu screens on the rune stone background: the game draws it as a 320x240 picture
+ * from two raw sprites (256 wide at x 0, 64 wide at x 256). Its lit circle fades to black ~10 px
+ * before the left edge but is cut at the right edge (still ~15 / 255 bright at x 319), which the wide
+ * picture showed as a straight cut. The circle is completed on the right: 20 more columns of the
+ * mirrored edge, tinted to the brightness of the circle's mirror image on the left. The rest of the sides is painted black with the picture (it is
+ * drawn first each frame), as the picture's surroundings. */
+static inline u16 texel(int u, int v, u32 tp, u32 clut);
+/* the rune picture's average brightness (r + g + b, 0..93) around texel (u, v): 5 columns x 9 rows */
+static int rune_lum(int u, int v, u32 tp, u32 clut) {
+    int sum = 0, n = 0;
+    for (int dv = -4; dv <= 4; dv++) {
+        int vv = v + dv;
+        if (vv < 0 || vv > 239) continue;
+        for (int du = -2; du <= 2; du++) {
+            if (u + du < 0) continue;                /* left of the picture */
+            u16 t = texel(u + du, vv, tp, clut);
+            sum += (t & 31) + ((t >> 5) & 31) + ((t >> 10) & 31); n++;
+        }
+    }
+    return n ? sum * 16 / n : 0;                  /* x16: keeps precision for the ratios */
+}
+#define RUNE_FADE_W 20   /* the circle's left side fades out over its first ~20 columns */
+#define RUNE_CX2    338  /* twice the circle's centre x (measured: 169) */
+static struct { u32 tp, clut; int u0, valid; } s_rune_left;   /* the left sprite (drawn after the right one) */
+static void rune_bg_sides(int x, int y, int ww, u32 col, int raw, int semi, int u0, u32 clut) {
+    ws_rune_bg();
+    int E = g_ws_extra;
+    if (x == 0) {                                 /* left side: dark; keep where its texture is */
+        hw_rect(-E, y, E, 240, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        s_rune_left.tp = g_gpu.texpage & 0x1FF; s_rune_left.clut = clut; s_rune_left.u0 = u0; s_rune_left.valid = 1;
+        return;
+    }
+    if (E > RUNE_FADE_W) hw_rect(320 + RUNE_FADE_W, y, E - RUNE_FADE_W, 240, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    int c = raw ? 128 : (int)(col & 255);         /* raw = unmodulated (128 = 1.0); else the fade colour */
+    u32 tp = g_gpu.texpage & 0x1FF;
+    /* mirrored about the last column's centre: that column (x 319, a few odd bluish texels) is not
+     * repeated next to itself */
+    int ue = u0 + ww - 2;
+    /* The edge columns mirrored keep the stone's grain; each cell of the strip is tinted so that its
+     * brightness follows the circle instead of the mirrored picture: the row's edge brightness at the
+     * seam, fading to black outwards (the mirrored columns alone are brighter near the top and bottom,
+     * where the circle bends, and made bumps). Brightness is the local average read from VRAM. */
+    enum { NX = 5, NY = 48 };
+    int col_[NX + 1][NY + 1];
+    for (int j = 0; j <= NY; j++) {
+        int v = j * 240 / NY;
+        int le = rune_lum(ue, v, tp, clut);
+        /* the circle is symmetric about x 169: x 320 + k is as bright as x 18 - k on the left (scaled so
+         * the seam matches this row's edge) */
+        int lx = RUNE_CX2 - 320, l0 = s_rune_left.valid ? rune_lum(s_rune_left.u0 + lx, v, s_rune_left.tp, s_rune_left.clut) : 0;
+        for (int i = 0; i <= NX; i++) {
+            int k = i * RUNE_FADE_W / NX, want;
+            if (l0 > 0) {
+                int lk = lx - k;
+                int lv = lk < -2 ? 0 : rune_lum(s_rune_left.u0 + lk, v, s_rune_left.tp, s_rune_left.clut);
+                want = (int)((s64)lv * le / l0);
+                if (want > le) want = le;
+            } else want = le * (NX - i) / NX;         /* no left side seen yet: a plain fade */
+            if (i == NX) want = 0;
+            int have = rune_lum(ue - k, v, tp, clut);
+            int m = have > 0 ? c * want / have : 0;
+            col_[i][j] = m > 255 ? 255 : m;
+        }
+    }
+    for (int j = 0; j < NY; j++)
+        for (int i = 0; i < NX; i++) {
+            int x0 = 320 + i * RUNE_FADE_W / NX, x1 = 320 + (i + 1) * RUNE_FADE_W / NX;
+            int ua = ue - i * RUNE_FADE_W / NX, ub = ue - (i + 1) * RUNE_FADE_W / NX;
+            int v0 = j * 240 / NY, v1 = (j + 1) * 240 / NY;
+            int a0 = col_[i][j], b0 = col_[i + 1][j], a1 = col_[i][j + 1], b1 = col_[i + 1][j + 1];
+            HwV q[4] = { { x0, y + v0, a0, a0, a0, ua, v0 }, { x1, y + v0, b0, b0, b0, ub, v0 },
+                         { x0, y + v1, a1, a1, a1, ua, v1 }, { x1, y + v1, b1, b1, b1, ub, v1 } };
+            hw_poly(q, 4, 1, 1, 0, semi, tp, clut);
+        }
+}   /* widescreen.c: the wide battle map (its panel top + 2), else 0 */   /* debug: log every GP0 packet while set (BRIG_GPUDUMP=<vblank>) */
 
 static inline int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
@@ -217,6 +295,8 @@ void gpu_gp0_packet(const u32 *w, int n) {
         for (int j = 0; j < hh; j++)
             for (int i = 0; i < ww; i++) g_vram[((y + j) & 511) * VRAM_W + ((x + i) & 1023)] = c;
         hw_fill(x, y, ww, hh, c);
+        /* a whole display buffer filled with a colour (SELECT RULER): its background, drawn to the wide sides */
+        if (g_hw_on && g_ws_extra && x == 0 && ww >= 320 && hh >= 240 && y % 240 == 0 && (c & 0x7FFF)) ws_bg_screen();
         return;
     }
     if (op >= 0x20 && op < 0x40) {
@@ -244,6 +324,18 @@ void gpu_gp0_packet(const u32 *w, int n) {
             for (int i = 0; i < nv; i++) { hv[i].x = v[i].x; hv[i].y = v[i].y; hv[i].r = v[i].r; hv[i].g = v[i].g;
                                            hv[i].b = v[i].b; hv[i].u = v[i].u; hv[i].v = v[i].v; }
             hw_poly(hv, nv, gour, tex, raw, semi, tp, clut);
+            /* an opaque, untextured quad over the whole screen (DOMAIN's gradient): the screen's background;
+             * the renderer stretches it to the wide sides (semi-transparent ones are fades, left alone) */
+            if (g_ws_extra && quad && !tex && !semi) {
+                int mnx = v[0].x, mxx = v[0].x, mny = v[0].y, mxy = v[0].y;
+                for (int i = 1; i < 4; i++) {
+                    if (v[i].x < mnx) mnx = v[i].x;
+                    if (v[i].x > mxx) mxx = v[i].x;
+                    if (v[i].y < mny) mny = v[i].y;
+                    if (v[i].y > mxy) mxy = v[i].y;
+                }
+                if (mnx <= 0 && mxx >= 320 && mny % 240 == 0 && mxy - mny >= 240) ws_bg_screen();
+            }
             /* ... and on to the right after its last piece (x 256..320, u 0..64): u 64..128 from x 320 */
             if (g_ws_mask_y && quad && tex && v[0].x == 256 && v[0].y % 240 == g_ws_mask_y - 2 && v[3].x == 320 &&
                 v[3].y == v[0].y + 48 && v[0].u == 0 && v[1].u == 64)
@@ -296,8 +388,10 @@ void gpu_gp0_packet(const u32 *w, int n) {
          * goes on to the left */
         if (g_hw_on && g_ws_mask_y && tex && x == 0 && y % 240 == g_ws_mask_y - 2 && ww == 128 && hh == 48 && u == 0) {
             hw_rect(-128, y, 128, hh, w[0] & 255, (w[0] >> 8) & 255, (w[0] >> 16) & 255, tex, raw, semi, u, v, clut);
-            hw_panel_extended();
         }
+        if (g_hw_on && g_ws_extra && tex && hh == 240 && y % 240 == 0 && v == 0 &&
+            ((x == 0 && ww == 256) || (x == 256 && ww == 64)))
+            rune_bg_sides(x, y, ww, w[0], raw, semi, u, clut);
         draw_rect(x, y, ww, hh, w[0] & 255, (w[0] >> 8) & 255, (w[0] >> 16) & 255, tex, raw, semi, u, v, clut);
         return;
     }

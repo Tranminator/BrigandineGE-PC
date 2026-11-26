@@ -776,14 +776,11 @@ int hw_debug_dump(const char *dir) {
 
 /* ------------------------------------------------------------------ display */
 int hw_display_is_wide(void) { return s_last_wide; }
-static unsigned s_disp_n, s_panel_n = 0x80000000u;
-void hw_panel_extended(void) { s_panel_n = s_disp_n; }
 
 int hw_display_texture(unsigned *tex, int *w, int *h, int show_vram) {
     if (!ready()) return 0;
     flush();
     s_last_wide = 0;
-    s_disp_n++;
     extern int g_ws_screen;   /* widescreen.c: this screen draws past its 320 pixels */
     if (!show_vram && g_ws_screen && wide_on() && g_gpu.disp_x == 0 && g_gpu.disp_w == WS_BUF_W && g_gpu.disp_h == 240 &&
         (g_gpu.disp_y == 0 || g_gpu.disp_y == 240) && g_gpu.disp_enabled) {
@@ -798,18 +795,6 @@ int hw_display_texture(unsigned *tex, int *w, int *h, int show_vram) {
         glBindFramebuffer(GL_READ_FRAMEBUFFER, s_wide_fbo);
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, s_disp_fbo);
         glBlitFramebuffer(0, g_gpu.disp_y * S, tw, (g_gpu.disp_y + 240) * S, 0, 0, tw, th, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-        /* the sides beside the 320-wide panel: black, unless its background was drawn on there */
-        extern int g_ws_mask_y;
-        if (g_ws_mask_y > 0 && g_ws_mask_y < 240 && s_disp_n - s_panel_n > 4) {
-            glBindFramebuffer(GL_FRAMEBUFFER, s_disp_fbo);
-            glEnable(GL_SCISSOR_TEST);
-            glClearColor(0, 0, 0, 1);
-            glScissor(0, g_ws_mask_y * S, E * S, (240 - g_ws_mask_y) * S);
-            glClear(GL_COLOR_BUFFER_BIT);
-            glScissor((E + WS_BUF_W) * S, g_ws_mask_y * S, E * S, (240 - g_ws_mask_y) * S);
-            glClear(GL_COLOR_BUFFER_BIT);
-            glDisable(GL_SCISSOR_TEST);
-        }
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         *tex = s_disp; *w = tw; *h = th;
         s_last_wide = 1;

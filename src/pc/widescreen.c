@@ -24,6 +24,8 @@
 #define WS_SMAP_BOX_PX 129   /* the strategy camera box half width on its nearest row (3.22 columns x ~40 px) */
 
 int g_ws_screen;                   /* this frame's screen draws past its 320 pixels */
+static int s_map_wide;             /* ... and it is a map (strategy / battle): view, camera, pointer widened */
+static unsigned s_rune_seen = 0x80000000u;
 int g_ws_mask_y;                   /* > 0: the wide battle map; its panel starts 2 lines above (gpu.c) */
 
 static const int k_extra[] = { 0, 53, 32 };   /* off, 16:9 (426x240), 16:10 (384x240) */
@@ -66,7 +68,7 @@ static void set_view_rect(int e) {
 }
 
 /* the battle map shown wide: E (the pointer may go that far past each side of the 320 pixels), else 0 */
-int ws_battle_extra(void) { return g_ws_screen && rd32(OVL_ID_ADDR) == 6 ? s_clip_wide : 0; }
+int ws_battle_extra(void) { return s_map_wide && rd32(OVL_ID_ADDR) == 6 ? s_clip_wide : 0; }
 
 /* the game picture's width for window sizes: 320, or 320 + 2E with widescreen chosen */
 int ws_picture_w(void) {
@@ -77,25 +79,31 @@ int ws_picture_w(void) {
 void ws_frame(void) {
     int mode = g_settings.widescreen;
     g_ws_extra = g_hw_on && mode >= 1 && mode <= 2 ? k_extra[mode] : 0;
-    g_ws_screen = 0;
+    s_map_wide = 0;
     s_vb++;
     /* the strategy map is on screen when the game drew its terrain just now (from the first frame
      * after a load or a menu; UI flag bit 3 only comes once the quill takes input) */
     u32 ovl = rd32(OVL_ID_ADDR);
-    if (g_ws_extra && ovl == 5 && s_vb - s_terrain_seen <= 2) g_ws_screen = 1;
+    if (g_ws_extra && ovl == 5 && s_vb - s_terrain_seen <= 2) s_map_wide = 1;
     /* the battle map likewise: its tile map was drawn just now (zoomed in, every other frame: one
      * slow frame more is allowed) */
     int battle = g_ws_extra && ovl == 6 && s_vb - s_tiles_seen <= 3;
-    if (battle) g_ws_screen = 1;
+    if (battle) s_map_wide = 1;
     g_ws_mask_y = battle ? BATTLE_PANEL_Y : 0;
-    set_view_rect(g_ws_screen ? g_ws_extra : 0);
+    set_view_rect(s_map_wide ? g_ws_extra : 0);
     set_tile_clip(battle ? g_ws_extra : 0);
+    /* menu screens on the rune stone background: shown wide, the stone drawn on to the sides (gpu.c);
+     * the maps' view rectangle, camera and pointer stay as they are */
+    g_ws_screen = s_map_wide || (g_ws_extra && s_vb - s_rune_seen <= 2);
 }
+
+/* gpu.c: the rune stone menu background (two raw sprites, 256x240 at x 0 and 64x240 at x 256) was drawn */
+void ws_rune_bg(void) { s_rune_seen = s_vb; }
 
 /* DivideFT4(v0..v3, uv0..uv3, rgbc, prim, ot, DIVPOLYGON4 *div): on entry the 12th argument (the
  * DIVPOLYGON4) is at sp + 44; its pih (screen width used for clipping) is at +4 */
 void hook_f_main_800566BC(Ctx *c) {
-    if (!g_ws_screen || !g_ws_extra) return;
+    if (!s_map_wide || !g_ws_extra) return;
     u32 div = rd32(c->r[29] + 44);
     if ((div & 0xFF000000u) != 0x80000000u) return;
     u32 pih = rd32(div + 4);
@@ -108,7 +116,7 @@ void hook_f_main_800566BC(Ctx *c) {
  * widened by E pixels each side, so the cursor can reach the sides before the camera follows. The z
  * part is the original (its bounds come from the projection, main func 80029918). */
 int hook_f_ov2_800B95D0(Ctx *c) {
-    if (!g_ws_screen || rd32(OVL_ID_ADDR) != 6 || !s_clip_wide) return 0;
+    if (!s_map_wide || rd32(OVL_ID_ADDR) != 6 || !s_clip_wide) return 0;
     u32 sp0 = c->r[29], sp = sp0 - 0x28, ra = c->r[31];
     wr16(sp + 0x10, (u16)(s16)-0x68); wr16(sp + 0x12, (u16)(s16)-0x40);
     wr16(sp + 0x14, 0xCF); wr16(sp + 0x16, (u16)(rd16(0x800E7A24) - 0x68));
@@ -142,7 +150,7 @@ int hook_f_ov2_800B95D0(Ctx *c) {
  * is the original. The tilted view keeps the original. */
 int hook_f_ov2_800B96F4(Ctx *c) {
     (void)c;
-    if (!g_ws_screen || rd32(OVL_ID_ADDR) != 6 || !s_clip_wide || s_vb - s_flat_seen > 3) return 0;
+    if (!s_map_wide || rd32(OVL_ID_ADDR) != 6 || !s_clip_wide || s_vb - s_flat_seen > 3) return 0;
     s32 vy = (s16)rd16(RAM_VIEW_RECT + 8 + 2), vh = (s16)rd16(RAM_VIEW_RECT + 8 + 6);   /* 0x800A6748 */
     s32 b0 = (s32)rd32(0x800A67B0);
     s32 zmin = (0x78 - (vy + 0x78) / 2) << 8;
@@ -161,7 +169,7 @@ int hook_f_ov2_800B96F4(Ctx *c) {
  * the right, so with the map edge between 320 and 320 + E nothing filled the wide side. On the wide
  * battle map those constants move out by E. */
 s32 ws_imm(u32 addr, s32 value) {
-    if (!g_ws_screen) return value;
+    if (!s_map_wide) return value;
     u32 ovl = rd32(OVL_ID_ADDR);
     if (addr >= 0x800B0000u) {                        /* strategy map camera follow box (ov1) */
         if (ovl != 5 || !g_ws_extra) return value;
@@ -175,7 +183,7 @@ s32 ws_imm(u32 addr, s32 value) {
 
 /* the screen shown wide where the pointer goes past the 320 pixels: E pixels each side, else 0 */
 int ws_pointer_extra(void) {
-    if (!g_ws_screen) return 0;
+    if (!s_map_wide) return 0;
     u32 ovl = rd32(OVL_ID_ADDR);
     return ovl == 6 ? s_clip_wide : ovl == 5 ? g_ws_extra : 0;
 }

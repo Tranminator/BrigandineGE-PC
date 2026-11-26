@@ -25,7 +25,7 @@
 
 int g_ws_screen;                   /* this frame's screen draws past its 320 pixels */
 static int s_map_wide;             /* ... and it is a map (strategy / battle): view, camera, pointer widened */
-static unsigned s_rune_seen = 0x80000000u;
+static unsigned s_rune_seen = 0x80000000u, s_bg_seen = 0x80000000u;
 int g_ws_mask_y;                   /* > 0: the wide battle map; its panel starts 2 lines above (gpu.c) */
 
 static const int k_extra[] = { 0, 53, 32 };   /* off, 16:9 (426x240), 16:10 (384x240) */
@@ -94,11 +94,15 @@ void ws_frame(void) {
     set_tile_clip(battle ? g_ws_extra : 0);
     /* menu screens on the rune stone background: shown wide, the stone drawn on to the sides (gpu.c);
      * the maps' view rectangle, camera and pointer stay as they are */
-    g_ws_screen = s_map_wide || (g_ws_extra && s_vb - s_rune_seen <= 2);
+    g_ws_screen = s_map_wide || (g_ws_extra && (s_vb - s_rune_seen <= 2 || s_vb - s_bg_seen <= 2));
 }
 
 /* gpu.c: the rune stone menu background (two raw sprites, 256x240 at x 0 and 64x240 at x 256) was drawn */
 void ws_rune_bg(void) { s_rune_seen = s_vb; }
+
+/* gpu.c: a background over the whole screen that reaches the wide sides by itself was drawn: an opaque
+ * full-screen gradient (DOMAIN) or a coloured fill of the whole buffer (SELECT RULER) */
+void ws_bg_screen(void) { s_bg_seen = s_vb; }
 
 /* DivideFT4(v0..v3, uv0..uv3, rgbc, prim, ot, DIVPOLYGON4 *div): on entry the 12th argument (the
  * DIVPOLYGON4) is at sp + 44; its pih (screen width used for clipping) is at +4 */

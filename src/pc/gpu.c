@@ -12,6 +12,7 @@ int g_gpu_skip_draw;
 int g_gpu_dump;
 extern int g_ws_mask_y;
 void ws_rune_bg(void);   /* widescreen.c */
+void ws_bg_screen(void); /* widescreen.c: a full-screen background was drawn */
 
 /* Wide picture, menu screens on the rune stone background: the game draws it as a 320x240 picture
  * from two raw sprites (256 wide at x 0, 64 wide at x 256). Its lit circle fades to black ~10 px
@@ -294,6 +295,8 @@ void gpu_gp0_packet(const u32 *w, int n) {
         for (int j = 0; j < hh; j++)
             for (int i = 0; i < ww; i++) g_vram[((y + j) & 511) * VRAM_W + ((x + i) & 1023)] = c;
         hw_fill(x, y, ww, hh, c);
+        /* a whole display buffer filled with a colour (SELECT RULER): its background, drawn to the wide sides */
+        if (g_hw_on && g_ws_extra && x == 0 && ww >= 320 && hh >= 240 && y % 240 == 0 && (c & 0x7FFF)) ws_bg_screen();
         return;
     }
     if (op >= 0x20 && op < 0x40) {
@@ -321,6 +324,18 @@ void gpu_gp0_packet(const u32 *w, int n) {
             for (int i = 0; i < nv; i++) { hv[i].x = v[i].x; hv[i].y = v[i].y; hv[i].r = v[i].r; hv[i].g = v[i].g;
                                            hv[i].b = v[i].b; hv[i].u = v[i].u; hv[i].v = v[i].v; }
             hw_poly(hv, nv, gour, tex, raw, semi, tp, clut);
+            /* an opaque, untextured quad over the whole screen (DOMAIN's gradient): the screen's background;
+             * the renderer stretches it to the wide sides (semi-transparent ones are fades, left alone) */
+            if (g_ws_extra && quad && !tex && !semi) {
+                int mnx = v[0].x, mxx = v[0].x, mny = v[0].y, mxy = v[0].y;
+                for (int i = 1; i < 4; i++) {
+                    if (v[i].x < mnx) mnx = v[i].x;
+                    if (v[i].x > mxx) mxx = v[i].x;
+                    if (v[i].y < mny) mny = v[i].y;
+                    if (v[i].y > mxy) mxy = v[i].y;
+                }
+                if (mnx <= 0 && mxx >= 320 && mny % 240 == 0 && mxy - mny >= 240) ws_bg_screen();
+            }
             /* ... and on to the right after its last piece (x 256..320, u 0..64): u 64..128 from x 320 */
             if (g_ws_mask_y && quad && tex && v[0].x == 256 && v[0].y % 240 == g_ws_mask_y - 2 && v[3].x == 320 &&
                 v[3].y == v[0].y + 48 && v[0].u == 0 && v[1].u == 64)

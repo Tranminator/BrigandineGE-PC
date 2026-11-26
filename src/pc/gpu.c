@@ -296,7 +296,6 @@ void gpu_gp0_packet(const u32 *w, int n) {
          * goes on to the left */
         if (g_hw_on && g_ws_mask_y && tex && x == 0 && y % 240 == g_ws_mask_y - 2 && ww == 128 && hh == 48 && u == 0) {
             hw_rect(-128, y, 128, hh, w[0] & 255, (w[0] >> 8) & 255, (w[0] >> 16) & 255, tex, raw, semi, u, v, clut);
-            hw_panel_extended();
         }
         draw_rect(x, y, ww, hh, w[0] & 255, (w[0] >> 8) & 255, (w[0] >> 16) & 255, tex, raw, semi, u, v, clut);
         return;

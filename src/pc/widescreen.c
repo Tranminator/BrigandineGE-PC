@@ -8,7 +8,8 @@
  *   battle map (overlay id 6): its tile map draw ran in the last frames: main func 8002727C (16x16
  *   tiles) or, zoomed in, main func 80027810 (polygons, from the view rectangle below). The tile one
  *   drops the columns outside x 0..319 (0x800A68D4 / 0x800A68D8): widened by E on each side. The
- *   unit / terrain panel below the map is 320 wide: the sides beside it are kept black (g_ws_mask_y).
+ *   unit / terrain panel below the map is 320 wide: its stone background is drawn on to the sides
+ *   (gpu.c, g_ws_mask_y = the panel's top + 2).
  *   strategy map (overlay 1, id 5): its terrain draw (ov1 func 800C3D58) ran in the last frames. Its terrain is drawn by main func 80028B14 through
  *   PsyQ DivideFT4, which drops a polygon whose four corners are all outside the screen width given in
  *   its DIVPOLYGON4 (pih = 320): that width is widened by 2E here, so the sides get their polygons
@@ -23,7 +24,7 @@
 #define WS_SMAP_BOX_PX 129   /* the strategy camera box half width on its nearest row (3.22 columns x ~40 px) */
 
 int g_ws_screen;                   /* this frame's screen draws past its 320 pixels */
-int g_ws_mask_y;                   /* > 0: the wide sides from this line down are blacked out (gpu_hw.c) */
+int g_ws_mask_y;                   /* > 0: the wide battle map; its panel starts 2 lines above (gpu.c) */
 
 static const int k_extra[] = { 0, 53, 32 };   /* off, 16:9 (426x240), 16:10 (384x240) */
 

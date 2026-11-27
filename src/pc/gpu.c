@@ -21,13 +21,15 @@ void ws_bg_screen(void); /* widescreen.c: a full-screen background was drawn */
  * mirrored edge, tinted to the brightness of the circle's mirror image on the left. The rest of the sides is painted black with the picture (it is
  * drawn first each frame), as the picture's surroundings. */
 static inline u16 texel(int u, int v, u32 tp, u32 clut);
-/* the rune picture's average brightness (r + g + b, 0..93) around texel (u, v): 5 columns x 9 rows */
-static int rune_lum(int u, int v, u32 tp, u32 clut) {
+/* the rune picture's average brightness (r + g + b, 0..93) around texel (u, v): 2 hw + 1 columns x 17
+ * rows. The mirrored strip uses 7 columns (rune strokes do not sway it); the left side, the brightness
+ * to match, its own column only (a wider window reached the lit part and left specks lit) */
+static int rune_lum_w(int u, int v, u32 tp, u32 clut, int hw) {
     int sum = 0, n = 0;
-    for (int dv = -4; dv <= 4; dv++) {
+    for (int dv = -8; dv <= 8; dv++) {
         int vv = v + dv;
         if (vv < 0 || vv > 239) continue;
-        for (int du = -2; du <= 2; du++) {
+        for (int du = -hw; du <= hw; du++) {
             if (u + du < 0) continue;                /* left of the picture */
             u16 t = texel(u + du, vv, tp, clut);
             sum += (t & 31) + ((t >> 5) & 31) + ((t >> 10) & 31); n++;
@@ -35,6 +37,7 @@ static int rune_lum(int u, int v, u32 tp, u32 clut) {
     }
     return n ? sum * 16 / n : 0;                  /* x16: keeps precision for the ratios */
 }
+static int rune_lum(int u, int v, u32 tp, u32 clut) { return rune_lum_w(u, v, tp, clut, 3); }
 #define RUNE_FADE_W 20   /* the circle's left side fades out over its first ~20 columns */
 #define RUNE_CX2    338  /* twice the circle's centre x (measured: 169) */
 static struct { u32 tp, clut; int u0, valid; } s_rune_left;   /* the left sprite (drawn after the right one) */
@@ -63,19 +66,26 @@ static void rune_bg_sides(int x, int y, int ww, u32 col, int raw, int semi, int 
         int le = rune_lum(ue, v, tp, clut);
         /* the circle is symmetric about x 169: x 320 + k is as bright as x 18 - k on the left (scaled so
          * the seam matches this row's edge) */
-        int lx = RUNE_CX2 - 320, l0 = s_rune_left.valid ? rune_lum(s_rune_left.u0 + lx, v, s_rune_left.tp, s_rune_left.clut) : 0;
+        int lx = RUNE_CX2 - 320, l0 = s_rune_left.valid ? rune_lum_w(s_rune_left.u0 + lx, v, s_rune_left.tp, s_rune_left.clut, 0) : 0;
         for (int i = 0; i <= NX; i++) {
             int k = i * RUNE_FADE_W / NX, want;
-            if (l0 > 0) {
+            if (s_rune_left.valid) {                 /* (also where the left is dark: l0 = 0) */
                 int lk = lx - k;
-                int lv = lk < -2 ? 0 : rune_lum(s_rune_left.u0 + lk, v, s_rune_left.tp, s_rune_left.clut);
-                want = (int)((s64)lv * le / l0);
+                int lv = lk < -2 ? 0 : rune_lum_w(s_rune_left.u0 + lk, v, s_rune_left.tp, s_rune_left.clut, 0);
+                /* scaled so the seam meets this row's edge, but only a little: where the left edge is
+                 * almost dark the ratio blew up faint specks into patches */
+                int num = le, den = l0;
+                if (den < 16 * 8) num = den = 1;          /* left edge nearly dark: as the left side */
+                else if (num * 2 > den * 3) num = den * 3 / 2;
+                else if (num * 3 < den * 2) num = den * 2 / 3;
+                want = (int)((s64)lv * num / den);
                 if (want > le) want = le;
             } else want = le * (NX - i) / NX;         /* no left side seen yet: a plain fade */
             if (i == NX) want = 0;
             int have = rune_lum(ue - k, v, tp, clut);
             int m = have > 0 ? c * want / have : 0;
-            col_[i][j] = m > 255 ? 255 : m;
+            col_[i][j] = m > c ? c : m;           /* never brighter than the picture: a dark spot (a rune
+                                                     * stroke) in the mirrored columns lit up as a patch */
         }
     }
     for (int j = 0; j < NY; j++)

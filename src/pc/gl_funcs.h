@@ -122,6 +122,7 @@ typedef ptrdiff_t GLsizeiptr;
     X(void, VertexAttribIPointer, (GLuint, GLint, GLenum, GLsizei, const void *)) \
     X(void, BufferSubData, (GLenum, GLsizeiptr, GLsizeiptr, const void *)) \
     X(void, Uniform4f, (GLint, GLfloat, GLfloat, GLfloat, GLfloat)) \
+    X(void, Uniform4i, (GLint, GLint, GLint, GLint, GLint)) \
     X(void, GetIntegerv, (GLenum, GLint *)) \
     X(void, BindFramebuffer, (GLenum, GLuint))
 

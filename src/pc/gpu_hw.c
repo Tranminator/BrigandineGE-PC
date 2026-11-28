@@ -146,6 +146,43 @@ static const char FS_COPY[] =
     "           (t & 0x8000u) != 0u ? 1.0 : 0.0);\n"
     "}\n";
 
+/* 4:3 screens with widescreen on (event pictures, the title...): the picture is a 320x240 image the
+ * game uploads, nothing exists past it. The sides are filled from the picture's own edges, mirrored,
+ * blurred more and darker further out (like a portrait video on a TV), so they take the scene's
+ * colours without competing with it. Drawn into the display texture: native pixel coordinates. */
+static const char VS_SIDE[] =
+    "#version 330 core\n"
+    "layout(location = 0) in vec2 a_pos;\n"
+    "void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }\n";
+static const char FS_SIDE[] =
+    "#version 330 core\n"
+    "uniform sampler2D u_src; uniform ivec4 u_area;\n"   /* source x0, y0 (native) | E | scale */
+    "out vec4 o;\n"
+    "vec3 at(float x, float y) {\n"
+    "  int S = u_area.w;\n"
+    "  ivec2 p = ivec2((u_area.x + int(clamp(x, 0.0, 319.0))) * S + S / 2, (u_area.y + int(clamp(y, 0.0, 239.0))) * S + S / 2);\n"
+    "  return texelFetch(u_src, p, 0).rgb;\n"
+    "}\n"
+    "void main() {\n"
+    "  int S = u_area.w; float E = float(u_area.z);\n"
+    "  vec2 n = gl_FragCoord.xy / float(S);\n"
+    "  float x = n.x - E, y = n.y;\n"
+    "  if (x >= 0.0 && x < 320.0) {\n"
+    "    o = vec4(texelFetch(u_src, ivec2(u_area.x * S, u_area.y * S) + ivec2(gl_FragCoord.xy) - ivec2(u_area.z * S, 0), 0).rgb, 1.0);\n"
+    "    return;\n"
+    "  }\n"
+    "  float d = x < 0.0 ? -x : x - 320.0;\n"          /* native pixels out from the picture's edge */
+    "  float sx = x < 0.0 ? d : 319.0 - d;\n"          /* mirrored about the edge */
+    "  float r = 4.0 + d * 0.6;\n"                     /* blur radius, wider further out */
+    "  vec3 c = vec3(0.0);\n"
+    "  for (int j = -4; j <= 4; j++) for (int i = -4; i <= 4; i++)\n"
+    "    c += at(sx + float(i) * r / 4.0, y + float(j) * r / 4.0);\n"
+    "  c /= 81.0;\n"
+    "  float t = clamp(d / E, 0.0, 1.0);\n"
+    "  o = vec4(c * mix(0.8, 0.25, sqrt(t)), 1.0);\n"
+    "}\n";
+static GLuint s_side_prog; static GLint us_src, us_area;
+
 static GLuint build(const char *vs, const char *fs) {
     GLuint p = glCreateProgram(), sh[2];
     /* fs starts with its #version line: insert the defines after it */
@@ -435,7 +472,10 @@ static int init_once(void) {
     if (s_max_scale < 2) { rt_log("[hw] max texture size %d too small", maxtex); return 0; }
     s_prog = build(VS, FS);
     s_copy_prog = build(VS, FS_COPY);
-    if (!s_prog || !s_copy_prog) return 0;
+    s_side_prog = build(VS_SIDE, FS_SIDE);
+    if (!s_prog || !s_copy_prog || !s_side_prog) return 0;
+    us_src = glGetUniformLocation(s_side_prog, "u_src");
+    us_area = glGetUniformLocation(s_side_prog, "u_area");
     u_vram = glGetUniformLocation(s_prog, "u_vram");
     u_mode = glGetUniformLocation(s_prog, "u_mode");
     u_pass = glGetUniformLocation(s_prog, "u_pass");
@@ -801,6 +841,38 @@ int hw_display_texture(unsigned *tex, int *w, int *h, int show_vram) {
         return 1;
     }
     if (s_vram_stale) { vram_from_wide(rc_make(0, 0, WS_BUF_W, WS_BUF_H)); s_vram_stale = 0; }
+    /* a 4:3 screen with widescreen on: its picture in the middle, the sides filled from its edges */
+    if (!show_vram && g_ws_extra > 0 && g_gpu.disp_enabled && g_gpu.disp_w == 320 && g_gpu.disp_h == 240 &&
+        g_gpu.disp_x + 320 <= VRAM_W && g_gpu.disp_y + 240 <= VRAM_H) {
+        int S = s_scale, E = g_ws_extra, tw = (320 + 2 * E) * S, th = 240 * S;
+        if (tw != s_disp_w || th != s_disp_h) {
+            if (s_disp_fbo) glDeleteFramebuffers(1, &s_disp_fbo);
+            if (s_disp) glDeleteTextures(1, &s_disp);
+            s_disp = make_rgba_target(tw, th, &s_disp_fbo, 0);
+            s_disp_w = tw; s_disp_h = th;
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER, s_disp_fbo);
+        glViewport(0, 0, tw, th);
+        glDisable(GL_BLEND); glDisable(GL_SCISSOR_TEST); glDisable(GL_DEPTH_TEST); glDisable(GL_CULL_FACE);
+        glColorMask(1, 1, 1, 1);
+        glUseProgram(s_side_prog);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, s_scaled);
+        glUniform1i(us_src, 0);
+        glUniform4i(us_area, g_gpu.disp_x, g_gpu.disp_y, E, S);
+        Vert q[6]; memset(q, 0, sizeof q);
+        float xy[6][2] = { { -1, -1 }, { 1, -1 }, { -1, 1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } };
+        for (int i = 0; i < 6; i++) { q[i].x = xy[i][0]; q[i].y = xy[i][1]; }
+        glBindVertexArray(s_vao);
+        glBindBuffer(GL_ARRAY_BUFFER, s_vbo);
+        draw_verts(q, 6);
+        glUseProgram(0);
+        glBindVertexArray(0);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        *tex = s_disp; *w = tw; *h = th;
+        s_last_wide = 1;
+        return 1;
+    }
     int x0 = show_vram ? 0 : g_gpu.disp_x, y0 = show_vram ? 0 : g_gpu.disp_y;
     int dw = show_vram ? VRAM_W : g_gpu.disp_w, dh = show_vram ? VRAM_H : g_gpu.disp_h;
     if (x0 + dw > VRAM_W) dw = VRAM_W - x0;

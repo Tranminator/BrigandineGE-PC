@@ -22,7 +22,7 @@ Boots and plays natively: title, menus, story/scenario, strategy map, unit organ
 FMV movies (with voice), XA + sequenced music, sound effects, reverb, settings window (F2), save / load.
 Memory card saves (standard 128 KB card images, compatible with emulators). High-resolution renderer.
 Both discs: the port swaps to Disc 2 / Disc 1 by itself when the game asks for it.
-Not done yet: long play-through testing, widescreen, Windows build.
+Not done yet: long play-through testing, Windows build.
 
 ## Build (macOS)
 ```sh
@@ -92,7 +92,8 @@ and the battle map show more at the sides, drawn by the game itself (no stretchi
 the middle). On both maps the mouse and the camera use the whole width. Menu screens on the rune stone
 background (Organize, UNITS, SAVE, OPTION, unit status...) keep its lit circle in the middle with dark
 sides; the circle, cut at the right edge in the original picture, is completed. DOMAIN and SELECT RULER
-run full width too. The title screen, event pictures and movies stay 4:3. `F5` quick save, `F9` quick load (see below). `F1` shows all of VRAM (debug). Hold `Tab` to fast-forward.
+run full width too. Event pictures (story scenes, quest reports) are 4:3 images: their sides are filled
+from the picture's own edges, mirrored, blurred and darkened. The title screen and movies stay 4:3. `F5` quick save, `F9` quick load (see below). `F1` shows all of VRAM (debug). Hold `Tab` to fast-forward.
 
 Settings: press `F2` (mouse, keyboard or controller; `F2`/`Esc` closes and saves). Game input is
 paused while the window is open.

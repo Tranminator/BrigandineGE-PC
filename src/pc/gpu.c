@@ -78,10 +78,17 @@ static void rune_bg_sides(int x, int y, int ww, u32 col, int raw, int semi, int 
                 /* scaled so the seam meets this row's edge, but only a little: where the left edge is
                  * almost dark the ratio blew up faint specks into patches */
                 int num = le, den = l0;
-                if (den < 16 * 8) num = den = 1;          /* left edge nearly dark: as the left side */
-                else if (num * 2 > den * 3) num = den * 3 / 2;
-                else if (num * 3 < den * 2) num = den * 2 / 3;
-                want = (int)((s64)lv * num / den);
+                if (den < 16 * 8) {
+                    /* left edge nearly dark (the LOAD screen, where the right edge is still lit): the
+                     * left side says nothing about this row; from the edge's own brightness, fading
+                     * out smoothly (copying the dark left cut the circle straight here) */
+                    int t = RUNE_FADE_W - k;
+                    want = (int)((s64)le * t * t / (RUNE_FADE_W * RUNE_FADE_W));
+                } else {
+                    if (num * 2 > den * 3) num = den * 3 / 2;
+                    else if (num * 3 < den * 2) num = den * 2 / 3;
+                    want = (int)((s64)lv * num / den);
+                }
                 if (want > le) want = le;
             } else want = le * (NX - i) / NX;         /* no left side seen yet: a plain fade */
             if (i == NX) want = 0;

@@ -24,6 +24,7 @@ static inline u16 texel(int u, int v, u32 tp, u32 clut);
 /* the rune picture's average brightness (r + g + b, 0..93) around texel (u, v): 2 hw + 1 columns x 17
  * rows. The mirrored strip uses 7 columns (rune strokes do not sway it); the left side, the brightness
  * to match, its own column only (a wider window reached the lit part and left specks lit) */
+static int s_rune_umax = 255;   /* the last texel column of the sprite being read */
 static int rune_lum_w(int u, int v, u32 tp, u32 clut, int hw) {
     int sum = 0, n = 0;
     for (int dv = -8; dv <= 8; dv++) {
@@ -31,6 +32,9 @@ static int rune_lum_w(int u, int v, u32 tp, u32 clut, int hw) {
         if (vv < 0 || vv > 239) continue;
         for (int du = -hw; du <= hw; du++) {
             if (u + du < 0) continue;                /* left of the picture */
+            /* right of the sprite: VRAM there is other data, dark on some screens and bright on others
+             * (the LOAD screen, Your Path?), which made the strip too dark or lit patches in it */
+            if (u + du > s_rune_umax) continue;
             u16 t = texel(u + du, vv, tp, clut);
             sum += (t & 31) + ((t >> 5) & 31) + ((t >> 10) & 31); n++;
         }
@@ -57,6 +61,7 @@ static void rune_bg_sides(int x, int y, int ww, u32 col, int raw, int semi, int 
     /* mirrored about the last column's centre: that column (x 319, a few odd bluish texels) is not
      * repeated next to itself */
     int ue = u0 + ww - 2;
+    s_rune_umax = u0 + ww - 1;
     /* The edge columns mirrored keep the stone's grain; each cell of the strip is tinted so that its
      * brightness follows the circle instead of the mirrored picture: the row's edge brightness at the
      * seam, fading to black outwards (the mirrored columns alone are brighter near the top and bottom,
@@ -78,17 +83,10 @@ static void rune_bg_sides(int x, int y, int ww, u32 col, int raw, int semi, int 
                 /* scaled so the seam meets this row's edge, but only a little: where the left edge is
                  * almost dark the ratio blew up faint specks into patches */
                 int num = le, den = l0;
-                if (den < 16 * 8) {
-                    /* left edge nearly dark (the LOAD screen, where the right edge is still lit): the
-                     * left side says nothing about this row; from the edge's own brightness, fading
-                     * out smoothly (copying the dark left cut the circle straight here) */
-                    int t = RUNE_FADE_W - k;
-                    want = (int)((s64)le * t * t / (RUNE_FADE_W * RUNE_FADE_W));
-                } else {
-                    if (num * 2 > den * 3) num = den * 3 / 2;
-                    else if (num * 3 < den * 2) num = den * 2 / 3;
-                    want = (int)((s64)lv * num / den);
-                }
+                if (den < 16 * 8) num = den = 1;          /* left edge nearly dark: as the left side */
+                else if (num * 2 > den * 3) num = den * 3 / 2;
+                else if (num * 3 < den * 2) num = den * 2 / 3;
+                want = (int)((s64)lv * num / den);
                 if (want > le) want = le;
             } else want = le * (NX - i) / NX;         /* no left side seen yet: a plain fade */
             if (i == NX) want = 0;
@@ -115,6 +113,7 @@ static void rune_bg_sides(int x, int y, int ww, u32 col, int raw, int semi, int 
                          { x0, y + v1, a1, a1, a1, ua, v1 }, { x1, y + v1, b1, b1, b1, ub, v1 } };
             hw_poly(q, 4, 1, 1, 0, semi, tp, clut);
         }
+    s_rune_umax = 255;
 }   /* widescreen.c: the wide battle map (its panel top + 2), else 0 */   /* debug: log every GP0 packet while set (BRIG_GPUDUMP=<vblank>) */
 
 static inline int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }

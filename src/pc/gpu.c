@@ -41,15 +41,17 @@ static int rune_lum(int u, int v, u32 tp, u32 clut) { return rune_lum_w(u, v, tp
 #define RUNE_FADE_W 20   /* the circle's left side fades out over its first ~20 columns */
 #define RUNE_CX2    338  /* twice the circle's centre x (measured: 169) */
 static struct { u32 tp, clut; int u0, valid; } s_rune_left;   /* the left sprite (drawn after the right one) */
-static void rune_bg_sides(int x, int y, int ww, u32 col, int raw, int semi, int u0, u32 clut) {
+/* (vs, vh): the rows drawn. The list screens (ORDER, ITEM, EQUIP...) redraw only the band behind
+ * the list (rows 74..211) each frame; y is the picture's top */
+static void rune_bg_sides(int x, int y, int ww, u32 col, int raw, int semi, int u0, u32 clut, int vs, int vh) {
     ws_rune_bg();
-    int E = g_ws_extra;
+    int E = g_ws_extra, ve = vs + vh;
     if (x == 0) {                                 /* left side: dark; keep where its texture is */
-        hw_rect(-E, y, E, 240, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        hw_rect(-E, y + vs, E, vh, 0, 0, 0, 0, 0, 0, 0, 0, 0);
         s_rune_left.tp = g_gpu.texpage & 0x1FF; s_rune_left.clut = clut; s_rune_left.u0 = u0; s_rune_left.valid = 1;
         return;
     }
-    if (E > RUNE_FADE_W) hw_rect(320 + RUNE_FADE_W, y, E - RUNE_FADE_W, 240, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    if (E > RUNE_FADE_W) hw_rect(320 + RUNE_FADE_W, y + vs, E - RUNE_FADE_W, vh, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     int c = raw ? 128 : (int)(col & 255);         /* raw = unmodulated (128 = 1.0); else the fade colour */
     u32 tp = g_gpu.texpage & 0x1FF;
     /* mirrored about the last column's centre: that column (x 319, a few odd bluish texels) is not
@@ -63,6 +65,7 @@ static void rune_bg_sides(int x, int y, int ww, u32 col, int raw, int semi, int 
     int col_[NX + 1][NY + 1];
     for (int j = 0; j <= NY; j++) {
         int v = j * 240 / NY;
+        if ((j + 1) * 240 / NY < vs || (j - 1) * 240 / NY >= ve) continue;   /* rows not drawn */
         int le = rune_lum(ue, v, tp, clut);
         /* the circle is symmetric about x 169: x 320 + k is as bright as x 18 - k on the left (scaled so
          * the seam matches this row's edge) */
@@ -93,7 +96,14 @@ static void rune_bg_sides(int x, int y, int ww, u32 col, int raw, int semi, int 
             int x0 = 320 + i * RUNE_FADE_W / NX, x1 = 320 + (i + 1) * RUNE_FADE_W / NX;
             int ua = ue - i * RUNE_FADE_W / NX, ub = ue - (i + 1) * RUNE_FADE_W / NX;
             int v0 = j * 240 / NY, v1 = (j + 1) * 240 / NY;
+            if (v1 <= vs || v0 >= ve) continue;
             int a0 = col_[i][j], b0 = col_[i + 1][j], a1 = col_[i][j + 1], b1 = col_[i + 1][j + 1];
+            if (v0 < vs || v1 > ve) {                 /* cell cut by the band: colours interpolated */
+                int c0 = v0 < vs ? vs : v0, c1 = v1 > ve ? ve : v1, d = v1 - v0;
+                int na0 = a0 + (a1 - a0) * (c0 - v0) / d, nb0 = b0 + (b1 - b0) * (c0 - v0) / d;
+                int na1 = a0 + (a1 - a0) * (c1 - v0) / d, nb1 = b0 + (b1 - b0) * (c1 - v0) / d;
+                a0 = na0; b0 = nb0; a1 = na1; b1 = nb1; v0 = c0; v1 = c1;
+            }
             HwV q[4] = { { x0, y + v0, a0, a0, a0, ua, v0 }, { x1, y + v0, b0, b0, b0, ub, v0 },
                          { x0, y + v1, a1, a1, a1, ua, v1 }, { x1, y + v1, b1, b1, b1, ub, v1 } };
             hw_poly(q, 4, 1, 1, 0, semi, tp, clut);
@@ -399,9 +409,10 @@ void gpu_gp0_packet(const u32 *w, int n) {
         if (g_hw_on && g_ws_mask_y && tex && x == 0 && y % 240 == g_ws_mask_y - 2 && ww == 128 && hh == 48 && u == 0) {
             hw_rect(-128, y, 128, hh, w[0] & 255, (w[0] >> 8) & 255, (w[0] >> 16) & 255, tex, raw, semi, u, v, clut);
         }
-        if (g_hw_on && g_ws_extra && tex && hh == 240 && y % 240 == 0 && v == 0 &&
-            ((x == 0 && ww == 256) || (x == 256 && ww == 64)))
-            rune_bg_sides(x, y, ww, w[0], raw, semi, u, clut);
+        /* the rune picture, whole (240 rows from v 0) or a band of it at its own rows */
+        if (g_hw_on && g_ws_extra && tex && clut == 0x3FD4 && v + hh <= 240 && y % 240 == v &&
+            ((x == 0 && ww == 256 && u == 0) || (x == 256 && ww == 64 && u == 0)))
+            rune_bg_sides(x, y - v, ww, w[0], raw, semi, u, clut, v, hh);
         draw_rect(x, y, ww, hh, w[0] & 255, (w[0] >> 8) & 255, (w[0] >> 16) & 255, tex, raw, semi, u, v, clut);
         return;
     }

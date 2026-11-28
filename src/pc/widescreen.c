@@ -59,9 +59,13 @@ static void set_tile_clip(int e) {
 }
 
 static void set_view_rect(int e) {
+    /* the battle overlay writes the original rectangle (-160, 320) again (battle start, and again in
+     * its loop): checked against RAM every frame, not only when E changes, or the tilted view's far
+     * corners kept the 4:3 tile range and were left black */
+    s16 w = (s16)rd16(RAM_VIEW_RECT + 4);
+    if (w == 320) s_view_wide = 0;                    /* the game's own values (again) */
+    else if (w != 320 + 2 * s_view_wide) { s_view_wide = 0; return; }   /* not the rectangle we know */
     if (e == s_view_wide) return;
-    if ((s16)rd16(RAM_VIEW_RECT + 4) != 320 + 2 * s_view_wide) { s_view_wide = 0; if (!e) return; }
-    if ((s16)rd16(RAM_VIEW_RECT + 4) != 320 + 2 * s_view_wide) return;   /* not the rectangle we know */
     wr16(RAM_VIEW_RECT + 0, (u16)(s16)(-160 - e));
     wr16(RAM_VIEW_RECT + 4, (u16)(320 + 2 * e));
     s_view_wide = e;

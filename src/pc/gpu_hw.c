@@ -709,8 +709,18 @@ void hw_pre_write(int x, int y, int w, int h) {
     if (list_hit(&s_reads, r)) flush();
 }
 
+/* display frames; per buffer: the last full-picture upload, and for how many display frames in a row
+ * one came (event pictures are uploaded again every frame; a still screen uploaded once is not one) */
+static unsigned s_disp_no = 1000, s_pic_up[2], s_pic_run[2];
 void hw_upload(int x, int y, int w, int h) {
     if (!ready()) return;
+    /* a whole 320x240 picture uploaded into a display buffer: an event picture (side fill below) */
+    if (x == 0 && w == 320 && h == 240 && (y == 0 || y == 240)) {
+        int b = y / 240;
+        if (s_disp_no - s_pic_up[b] > 3) s_pic_run[b] = 0;      /* a gap: a new run */
+        else if (s_disp_no != s_pic_up[b]) s_pic_run[b]++;
+        s_pic_up[b] = s_disp_no;
+    }
     flush();
     Rc r = rc_make(x, y, w, h);
     list_add(&s_dirty, r);
@@ -841,9 +851,13 @@ int hw_display_texture(unsigned *tex, int *w, int *h, int show_vram) {
         return 1;
     }
     if (s_vram_stale) { vram_from_wide(rc_make(0, 0, WS_BUF_W, WS_BUF_H)); s_vram_stale = 0; }
-    /* a 4:3 screen with widescreen on: its picture in the middle, the sides filled from its edges */
-    if (!show_vram && g_ws_extra > 0 && g_gpu.disp_enabled && g_gpu.disp_w == 320 && g_gpu.disp_h == 240 &&
-        g_gpu.disp_x + 320 <= VRAM_W && g_gpu.disp_y + 240 <= VRAM_H) {
+    /* an event picture with widescreen on (the game uploads the whole 320x240 picture into the buffer
+     * shown, every frame): the picture in the middle, the sides filled from its edges. Other 4:3
+     * screens (NOW LOADING...) keep black sides: their edges are not a picture to continue */
+    s_disp_no++;
+    if (!show_vram && g_ws_extra > 0 && g_gpu.disp_enabled && g_gpu.disp_x == 0 && g_gpu.disp_w == 320 && g_gpu.disp_h == 240 &&
+        (g_gpu.disp_y == 0 || g_gpu.disp_y == 240) &&
+        s_disp_no - s_pic_up[g_gpu.disp_y / 240] <= 4 && s_pic_run[g_gpu.disp_y / 240] >= 8) {
         int S = s_scale, E = g_ws_extra, tw = (320 + 2 * E) * S, th = 240 * S;
         if (tw != s_disp_w || th != s_disp_h) {
             if (s_disp_fbo) glDeleteFramebuffers(1, &s_disp_fbo);
